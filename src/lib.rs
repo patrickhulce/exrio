@@ -1,3 +1,5 @@
+use smallvec::SmallVec;
+
 use exr::prelude::read::any_channels::ReadAnyChannels;
 use exr::prelude::read::layers::ReadAllLayers;
 use exr::prelude::read::samples::ReadFlatSamples;
@@ -26,6 +28,88 @@ fn get_image_reader() -> ReadImage<fn(f64), ReadAllLayers<ReadAnyChannels<ReadFl
 
 fn vec_to_numpy_array<'py>(py: Python<'py>, vec: &Vec<f32>) -> Bound<'py, PyArray1<f32>> {
     PyArray1::from_iter(py, vec.iter().map(|value| *value as f32))
+}
+
+fn test_fn() {
+    let pixels = SpecificChannels::build()
+        .with_channel("Kharthanasus Korthus")
+        .with_channel("Y")
+        .with_channel("11023")
+        .with_channel("*?!")
+        .with_channel("`--\"")
+        .with_channel("\r\r\r\n\n")
+        .with_pixel_fn(|position| {
+            if position.0 < 1000 {
+                (
+                    f16::from_f32(0.2),
+                    0.666_f32,
+                    4_u32,
+                    1532434.0213_f32,
+                    0.99999_f32,
+                    3.142594_f32 / 4.0,
+                )
+            } else {
+                (
+                    f16::from_f32(0.4),
+                    0.777_f32,
+                    8_u32,
+                    102154.3_f32,
+                    0.00001_f32,
+                    3.142594_f32 / 4.0,
+                )
+            }
+        });
+
+    Image::from_channels((2000, 1400), pixels);
+}
+
+fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
+    let name = match &layer.name {
+        Some(name) => name,
+        None => return None,
+    };
+
+    let width = match &layer.width {
+        Some(width) => width,
+        None => return None,
+    };
+
+    let height = match &layer.height {
+        Some(height) => height,
+        None => return None,
+    };
+
+    let pixels_f32 = match &layer.pixels_f32 {
+        Some(pixels_f32) => pixels_f32.clone(),
+        None => return None,
+    };
+
+    let mut channels_list = Vec::<AnyChannel<FlatSamples>>::new();
+
+    for (index, channel) in pixels_f32.iter().enumerate() {
+        let channel_name = match layer.channels.get(index) {
+            Some(channel_name) => channel_name,
+            None => return None,
+        };
+
+        channels_list.push(AnyChannel::new(
+            channel_name.as_str(),
+            FlatSamples::F32(channel.clone()),
+        ));
+    }
+
+    let channels_builder = AnyChannels::sort(SmallVec::from_vec(channels_list));
+
+    let test_image = Image::from_channels(Vec2(*width, *height), channels_builder);
+
+    let layer_out = Layer::new(
+        Vec2(*width, *height),
+        LayerAttributes::named(Text::from(name.as_str())),
+        Encoding::FAST_LOSSLESS,
+        test_image.layer_data.channel_data,
+    );
+
+    Some(layer_out)
 }
 
 #[pyclass]
@@ -232,6 +316,26 @@ impl ExrImage {
 
     fn with_layer(&mut self, layer: ExrLayer) {
         self.layers.push(layer);
+    }
+
+    fn save_to_path(&self, file_path: &str) -> PyResult<()> {
+        let first_layer = self.layers.first().unwrap();
+        let rust_layers: Vec<Layer<AnyChannels<FlatSamples>>> = self
+            .layers
+            .iter()
+            .flat_map(|layer| to_rust_layer(layer))
+            .collect();
+
+        let mut attributes = self.attributes.clone();
+        attributes.display_window.size.0 = first_layer.width.unwrap();
+        attributes.display_window.size.1 = first_layer.height.unwrap();
+
+        Image::from_layers(attributes, rust_layers)
+            .write()
+            .to_file(file_path)
+            .map_err(|e| PyIOError::new_err(e.to_string()))?;
+
+        Ok(())
     }
 
     #[staticmethod]

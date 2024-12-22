@@ -24,30 +24,30 @@ fn get_image_reader() -> ReadImage<fn(f64), ReadAllLayers<ReadAnyChannels<ReadFl
     image
 }
 
-fn vec_f32_to_u8(vec: &Vec<f32>) -> Vec<u8> {
-    vec.iter().flat_map(|value| value.to_le_bytes()).collect()
-}
-
-fn vec_to_pybytes<'py>(py: Python<'py>, vec: &Vec<f32>) -> Bound<'py, PyBytes> {
-    PyBytes::new(py, vec_f32_to_u8(vec).as_slice())
+fn vec_to_numpy_array<'py>(py: Python<'py>, vec: &Vec<f32>) -> Bound<'py, PyArray1<f32>> {
+    PyArray1::from_iter(py, vec.iter().map(|value| *value as f32))
 }
 
 #[pyclass]
 #[derive(Clone)]
 struct ExrLayer {
     name: Option<String>,
-    channels: String,
+    channels: Option<Vec<String>>,
+    width: Option<u32>,
+    height: Option<u32>,
     pixels_f32: Option<Vec<Vec<f32>>>,
 }
 
 fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
     let name = exr_layer.attributes.layer_name.map(|name| name.to_string());
-    let channels = exr_layer
-        .channel_data
-        .list
-        .iter()
-        .map(|channel| channel.name.to_string())
-        .collect();
+    let channels = Some(
+        exr_layer
+            .channel_data
+            .list
+            .iter()
+            .map(|channel| channel.name.to_string())
+            .collect(),
+    );
     let pixels_f32 = Some(
         exr_layer
             .channel_data
@@ -60,6 +60,8 @@ fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
     ExrLayer {
         name,
         channels,
+        width: Some(exr_layer.size.0 as u32),
+        height: Some(exr_layer.size.1 as u32),
         pixels_f32,
     }
 }
@@ -67,11 +69,13 @@ fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
 #[pymethods]
 impl ExrLayer {
     #[new]
-    #[pyo3(signature = (name = None, channels = "RGB"))]
-    fn new(name: Option<String>, channels: &str) -> Self {
+    #[pyo3(signature = (name = None, channels = None))]
+    fn new(name: Option<String>, channels: Option<Vec<String>>) -> Self {
         Self {
             name,
-            channels: channels.to_string(),
+            channels,
+            width: None,
+            height: None,
             pixels_f32: None,
         }
     }
@@ -80,15 +84,23 @@ impl ExrLayer {
         self.name.clone()
     }
 
-    fn channels(&self) -> Vec<String> {
-        self.channels.chars().map(|s| s.to_string()).collect()
+    fn channels(&self) -> Option<Vec<String>> {
+        self.channels.clone()
     }
 
-    fn pixels_f32<'py>(&self, py: Python<'py>) -> PyResult<Option<Vec<Bound<'py, PyBytes>>>> {
+    fn width(&self) -> Option<u32> {
+        self.width
+    }
+
+    fn height(&self) -> Option<u32> {
+        self.height
+    }
+
+    fn pixels_f32<'py>(&self, py: Python<'py>) -> PyResult<Option<Vec<Bound<'py, PyArray1<f32>>>>> {
         let pixels_32 = self.pixels_f32.clone().map(|channels| {
             channels
                 .iter()
-                .map(|channel| vec_to_pybytes(py, channel))
+                .map(|channel| vec_to_numpy_array(py, channel))
                 .collect()
         });
 

@@ -15,6 +15,9 @@ use pyo3::{
     Bound, FromPyObject, PyAny, PyObject, PyResult, Python,
 };
 
+mod attributes;
+use attributes::{ImageAttributeHandler, IMAGE_HANDLERS};
+
 fn get_image_reader() -> ReadImage<fn(f64), ReadAllLayers<ReadAnyChannels<ReadFlatSamples>>> {
     let image = read()
         .no_deep_data()
@@ -28,39 +31,6 @@ fn get_image_reader() -> ReadImage<fn(f64), ReadAllLayers<ReadAnyChannels<ReadFl
 
 fn vec_to_numpy_array<'py>(py: Python<'py>, vec: &Vec<f32>) -> Bound<'py, PyArray1<f32>> {
     PyArray1::from_iter(py, vec.iter().map(|value| *value as f32))
-}
-
-fn test_fn() {
-    let pixels = SpecificChannels::build()
-        .with_channel("Kharthanasus Korthus")
-        .with_channel("Y")
-        .with_channel("11023")
-        .with_channel("*?!")
-        .with_channel("`--\"")
-        .with_channel("\r\r\r\n\n")
-        .with_pixel_fn(|position| {
-            if position.0 < 1000 {
-                (
-                    f16::from_f32(0.2),
-                    0.666_f32,
-                    4_u32,
-                    1532434.0213_f32,
-                    0.99999_f32,
-                    3.142594_f32 / 4.0,
-                )
-            } else {
-                (
-                    f16::from_f32(0.4),
-                    0.777_f32,
-                    8_u32,
-                    102154.3_f32,
-                    0.00001_f32,
-                    3.142594_f32 / 4.0,
-                )
-            }
-        });
-
-    Image::from_channels((2000, 1400), pixels);
 }
 
 fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
@@ -100,13 +70,13 @@ fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
 
     let channels_builder = AnyChannels::sort(SmallVec::from_vec(channels_list));
 
-    let test_image = Image::from_channels(Vec2(*width, *height), channels_builder);
+    let image_with_channels = Image::from_channels(Vec2(*width, *height), channels_builder);
 
     let layer_out = Layer::new(
         Vec2(*width, *height),
         LayerAttributes::named(Text::from(name.as_str())),
         Encoding::FAST_LOSSLESS,
-        test_image.layer_data.channel_data,
+        image_with_channels.layer_data.channel_data,
     );
 
     Some(layer_out)
@@ -146,6 +116,58 @@ fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
         height: Some(exr_layer.size.1),
         pixels_f32,
     }
+}
+
+fn get_image_attributes_dict<'py>(
+    py: Python<'py>,
+    attributes: &ImageAttributes,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dict = PyDict::new(py);
+    for (key, handler) in attributes::IMAGE_HANDLERS {
+        match (handler.getter)(attributes, py) {
+            Some(value) => match value {
+                Ok(value) => dict.set_item(key, value)?,
+                Err(e) => return Err(e),
+            },
+            None => (),
+        }
+    }
+
+    for (key, value) in attributes.other.iter() {
+        match value {
+            AttributeValue::Text(text) => dict.set_item(key.to_string(), text.to_string())?,
+            AttributeValue::F64(f64) => dict.set_item(key.to_string(), f64)?,
+            AttributeValue::F32(f32) => dict.set_item(key.to_string(), f32)?,
+            AttributeValue::I32(i32) => dict.set_item(key.to_string(), i32)?,
+            _ => (),
+        }
+    }
+
+    Ok(dict)
+}
+
+fn set_image_attributes(attributes: &mut ImageAttributes, dict: &Bound<PyDict>) -> PyResult<()> {
+    for (key, handler) in attributes::IMAGE_HANDLERS {
+        match dict.contains(key) {
+            Ok(true) => (handler.setter)(attributes, dict)?,
+            _ => (),
+        }
+    }
+
+    for (key, value) in dict.iter() {
+        let key_str = key.to_string();
+        if attributes::IMAGE_HANDLERS
+            .iter()
+            .all(|(k, _)| k != &key_str)
+        {
+            let key_text = Text::from(key_str.as_str());
+            let value_text = Text::from(value.to_string().as_str());
+            let attribute_value = AttributeValue::Text(value_text);
+            attributes.other.insert(key_text, attribute_value);
+        }
+    }
+
+    Ok(())
 }
 
 #[pymethods]
@@ -260,54 +282,11 @@ impl ExrImage {
     }
 
     fn attributes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        let attributes = PyDict::new(py);
-        attributes.set_item(
-            "display_window.position.0",
-            self.attributes.display_window.position.0,
-        )?;
-        attributes.set_item(
-            "display_window.position.1",
-            self.attributes.display_window.position.1,
-        )?;
-        attributes.set_item(
-            "display_window.size.0",
-            self.attributes.display_window.size.0,
-        )?;
-        attributes.set_item(
-            "display_window.size.1",
-            self.attributes.display_window.size.1,
-        )?;
-        attributes.set_item("pixel_aspect", self.attributes.pixel_aspect)?;
+        get_image_attributes_dict(py, &self.attributes)
+    }
 
-        match self.attributes.chromaticities {
-            Some(chromaticities) => {
-                attributes.set_item("chromaticities.blue.0", chromaticities.blue.0)?;
-                attributes.set_item("chromaticities.blue.1", chromaticities.blue.1)?;
-                attributes.set_item("chromaticities.green.0", chromaticities.green.0)?;
-                attributes.set_item("chromaticities.green.1", chromaticities.green.1)?;
-                attributes.set_item("chromaticities.red.0", chromaticities.red.0)?;
-                attributes.set_item("chromaticities.red.1", chromaticities.red.1)?;
-                attributes.set_item("chromaticities.white.0", chromaticities.white.0)?;
-                attributes.set_item("chromaticities.white.1", chromaticities.white.1)?;
-            }
-            None => (),
-        }
-
-        match self.attributes.time_code {
-            Some(time_code) => {
-                attributes.set_item("time_code.hours", time_code.hours)?;
-                attributes.set_item("time_code.minutes", time_code.minutes)?;
-                attributes.set_item("time_code.seconds", time_code.seconds)?;
-                attributes.set_item("time_code.frames", time_code.frame)?;
-            }
-            None => (),
-        }
-
-        for (key, value) in self.attributes.other.iter() {
-            attributes.set_item(key.to_string(), format!("{:?}", value))?;
-        }
-
-        Ok(attributes)
+    fn with_attributes(&mut self, dict: &Bound<PyDict>) -> PyResult<()> {
+        set_image_attributes(&mut self.attributes, dict)
     }
 
     fn layers(&self) -> Vec<ExrLayer> {
@@ -318,7 +297,7 @@ impl ExrImage {
         self.layers.push(layer);
     }
 
-    fn save_to_path(&self, file_path: &str) -> PyResult<()> {
+    fn save_to_path<'py>(&self, py: Python<'py>, file_path: &str) -> PyResult<()> {
         let first_layer = self.layers.first().unwrap();
         let rust_layers: Vec<Layer<AnyChannels<FlatSamples>>> = self
             .layers

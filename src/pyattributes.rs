@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::format};
 
 use attribute::Chromaticities;
 use exr::meta::attribute::TimeCode;
@@ -10,6 +10,17 @@ use pyo3::{
     types::{PyAnyMethods, PyBytes, PyDict, PyDictMethods, PyModule, PyModuleMethods},
     Bound, FromPyObject, Py, PyAny, PyErr, PyObject, PyResult, Python,
 };
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+
+#[derive(Serialize, Deserialize, Default)]
+struct SerializableAttrValue {
+    pub values_i32: Option<Vec<i32>>,
+    pub values_f32: Option<Vec<f32>>,
+    pub values_text: Option<Vec<String>>,
+    pub values_u8: Option<Vec<u8>>,
+    pub values_bool: Option<Vec<bool>>,
+}
 
 pub type AttributeValueSerializeFn =
     for<'py> fn(&AttributeValue, Python<'py>) -> Option<PyResult<Py<PyAny>>>;
@@ -88,6 +99,146 @@ pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
         },
         from_python: |value| match value.extract::<String>() {
             Ok(value) => Ok(AttributeValue::Text(Text::from(value.as_str()))),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "timecode",
+        to_python: |value, py| match value {
+            AttributeValue::TimeCode(timecode) => {
+                let serializable_value = SerializableAttrValue {
+                    values_i32: Some(vec![
+                        timecode.hours as i32,
+                        timecode.minutes as i32,
+                        timecode.seconds as i32,
+                        timecode.frame as i32,
+                    ]),
+                    values_f32: None,
+                    values_text: None,
+                    values_u8: Some(timecode.binary_groups.to_vec()),
+                    values_bool: Some(vec![
+                        timecode.drop_frame,
+                        timecode.color_frame,
+                        timecode.field_phase,
+                        timecode.binary_group_flags[0],
+                        timecode.binary_group_flags[1],
+                        timecode.binary_group_flags[2],
+                    ]),
+                };
+
+                match serde_json::to_string(&serializable_value) {
+                    Ok(value) => Some(format!("timecode:{}", value).into_py_any(py)),
+                    Err(e) => return Some(Err(PyIOError::new_err(format!("{} invalid", e)))),
+                }
+            }
+            _ => None,
+        },
+        from_python: |value| match value.extract::<String>() {
+            Ok(value) => {
+                if !value.starts_with("timecode:") {
+                    return Err(PyIOError::new_err("Invalid timecode"));
+                }
+
+                let value = value[8..].to_string();
+                match serde_json::from_str::<SerializableAttrValue>(&value) {
+                    Ok(value) => {
+                        let values_i32 = value.values_i32.unwrap();
+                        let values_bool = value.values_bool.unwrap();
+                        let values_u8 = value.values_u8.unwrap();
+
+                        Ok(AttributeValue::TimeCode(TimeCode {
+                            hours: values_i32[0] as u8,
+                            minutes: values_i32[1] as u8,
+                            seconds: values_i32[2] as u8,
+                            frame: values_i32[3] as u8,
+                            drop_frame: values_bool[0],
+                            color_frame: values_bool[1],
+                            field_phase: values_bool[2],
+                            binary_group_flags: [values_bool[3], values_bool[4], values_bool[5]],
+                            binary_groups: values_u8.try_into().unwrap(),
+                        }))
+                    }
+                    Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+                }
+            }
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "integer",
+        to_python: |value, py| match value {
+            AttributeValue::I32(integer) => Some(integer.into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<i32>() {
+            Ok(value) => Ok(AttributeValue::I32(value)),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "intvec2",
+        to_python: |value, py| match value {
+            AttributeValue::IntVec2(vec) => Some([vec.0, vec.1].into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<Vec<i32>>() {
+            Ok(value) => Ok(AttributeValue::IntVec2(Vec2(value[0], value[1]))),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "floatvec2",
+        to_python: |value, py| match value {
+            AttributeValue::FloatVec2(vec) => Some([vec.0, vec.1].into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<Vec<f32>>() {
+            Ok(value) => Ok(AttributeValue::FloatVec2(Vec2(value[0], value[1]))),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "chromaticities",
+        to_python: |value, py| match value {
+            AttributeValue::Chromaticities(chromaticities) => Some(
+                format!(
+                    "chroma:{:?}-{:?}-{:?}-{:?}-{:?}-{:?}-{:?}-{:?}",
+                    chromaticities.red.0,
+                    chromaticities.red.1,
+                    chromaticities.green.0,
+                    chromaticities.green.1,
+                    chromaticities.blue.0,
+                    chromaticities.blue.1,
+                    chromaticities.white.0,
+                    chromaticities.white.1
+                )
+                .into_py_any(py),
+            ),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<String>() {
+            Ok(value) => {
+                if !value.starts_with("chroma:") {
+                    return Err(PyIOError::new_err("Invalid chromaticities"));
+                }
+
+                let values = value
+                    .replace("chroma:", "")
+                    .split('-')
+                    .flat_map(|s| s.parse::<f32>())
+                    .collect::<Vec<f32>>();
+
+                if values.len() != 8 {
+                    return Err(PyIOError::new_err("Invalid chromaticities"));
+                }
+
+                Ok(AttributeValue::Chromaticities(Chromaticities {
+                    red: Vec2(values[0], values[1]),
+                    green: Vec2(values[2], values[3]),
+                    blue: Vec2(values[4], values[5]),
+                    white: Vec2(values[6], values[7]),
+                }))
+            }
             Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
         },
     },

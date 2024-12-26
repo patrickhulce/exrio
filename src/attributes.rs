@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
 use exr::{
-    meta::attribute::{EnvironmentMap, KeyCode, Matrix4x4, Preview, Rational},
+    meta::attribute::{
+        Chromaticities, EnvironmentMap, KeyCode, Matrix4x4, Preview, Rational, TimeCode,
+    },
     prelude::{
         AttributeValue, ImageAttributes, IntegerBounds, LayerAttributes, Result, Text, Vec2,
     },
@@ -73,6 +75,20 @@ fn extract_preview(value: &AttributeValue) -> Option<Preview> {
 fn extract_integer_bounds(value: &AttributeValue) -> Option<IntegerBounds> {
     match value {
         AttributeValue::IntegerBounds(bounds) => Some(bounds.clone()),
+        _ => None,
+    }
+}
+
+fn extract_chromaticities(value: &AttributeValue) -> Option<Chromaticities> {
+    match value {
+        AttributeValue::Chromaticities(chrom) => Some(chrom.clone()),
+        _ => None,
+    }
+}
+
+fn extract_time_code(value: &AttributeValue) -> Option<TimeCode> {
+    match value {
+        AttributeValue::TimeCode(tc) => Some(tc.clone()),
         _ => None,
     }
 }
@@ -507,7 +523,105 @@ pub fn layer_attributes_from_attributes(
         }
     }
 
+    for handler in VEC2_F32_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in VEC2_I32_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
     for handler in TEXT_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in MATRIX4X4_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in ENVIRONMENT_MAP_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in KEY_CODE_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in RATIONAL_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in INTEGER_BOUNDS_LAYER_ATTRIBUTES {
         let extracted_value = attributes
             .remove(&Text::from(handler.name))
             .map(|value| (handler.extract)(&value))
@@ -550,6 +664,36 @@ const IMAGE_ATTRIBUTES: &[ImageAttributeHandler] = &[
                 attrs.pixel_aspect = pixel_aspect;
             }
 
+            Ok(())
+        },
+    },
+    ImageAttributeHandler {
+        name: "chromaticities",
+        get: |attrs| {
+            attrs
+                .chromaticities
+                .as_ref()
+                .map(|c| AttributeValue::Chromaticities(c.clone()))
+        },
+        set: |attrs, value| {
+            if let AttributeValue::Chromaticities(chrom) = value {
+                attrs.chromaticities = Some(chrom);
+            }
+            Ok(())
+        },
+    },
+    ImageAttributeHandler {
+        name: "time_code",
+        get: |attrs| {
+            attrs
+                .time_code
+                .as_ref()
+                .map(|tc| AttributeValue::TimeCode(tc.clone()))
+        },
+        set: |attrs, value| {
+            if let AttributeValue::TimeCode(tc) = value {
+                attrs.time_code = Some(tc);
+            }
             Ok(())
         },
     },

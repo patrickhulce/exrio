@@ -84,11 +84,10 @@ pub fn attributes_from_layer(layer_attributes: &LayerAttributes) -> HashMap<Text
         }
     }
 
-    if let Some(layer_name) = &layer_attributes.layer_name {
-        attributes.insert(
-            Text::from("layer_name"),
-            AttributeValue::Text(layer_name.clone()),
-        );
+    for handler in TEXT_LAYER_ATTRIBUTES {
+        if let Some(value) = (handler.get)(layer_attributes) {
+            attributes.insert(Text::from(handler.name), value);
+        }
     }
 
     attributes
@@ -101,6 +100,20 @@ pub fn layer_attributes_from_attributes(
     let mut attributes = attributes.clone();
 
     for handler in FLOAT_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    for handler in TEXT_LAYER_ATTRIBUTES {
         let extracted_value = attributes
             .remove(&Text::from(handler.name))
             .map(|value| (handler.extract)(&value))

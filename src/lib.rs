@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use smallvec::SmallVec;
 
 use exr::prelude::read::any_channels::ReadAnyChannels;
@@ -16,7 +18,7 @@ use pyo3::{
 };
 
 mod attributes;
-use attributes::{ImageAttributeHandler, IMAGE_HANDLERS};
+use attributes::{from_python, to_python, ImageAttributeHandler, IMAGE_HANDLERS};
 
 fn get_image_reader() -> ReadImage<fn(f64), ReadAllLayers<ReadAnyChannels<ReadFlatSamples>>> {
     let image = read()
@@ -90,9 +92,11 @@ struct ExrLayer {
     width: Option<usize>,
     height: Option<usize>,
     pixels_f32: Option<Vec<Vec<f32>>>,
+    attributes: HashMap<Text, AttributeValue>,
 }
 
 fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
+    let attributes = attributes_from_layer(&exr_layer.attributes);
     let name = exr_layer.attributes.layer_name.map(|name| name.to_string());
     let channels = exr_layer
         .channel_data
@@ -115,57 +119,77 @@ fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
         width: Some(exr_layer.size.0),
         height: Some(exr_layer.size.1),
         pixels_f32,
+        attributes,
     }
 }
 
-fn get_image_attributes_dict<'py>(
+fn pydict_from_attributes<'py>(
     py: Python<'py>,
-    attributes: &ImageAttributes,
+    attributes: &HashMap<Text, AttributeValue>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let dict = PyDict::new(py);
-    for (key, handler) in attributes::IMAGE_HANDLERS {
-        match (handler.getter)(attributes, py) {
-            Some(value) => match value {
-                Ok(value) => dict.set_item(key, value)?,
-                Err(e) => return Err(e),
-            },
-            None => (),
-        }
+    for (key, value) in attributes.iter() {
+        let py_value = attributes::to_python(key.to_string().as_str(), value, py)?;
+        dict.set_item(key.to_string(), py_value)?;
     }
-
-    for (key, value) in attributes.other.iter() {
-        match value {
-            AttributeValue::Text(text) => dict.set_item(key.to_string(), text.to_string())?,
-            AttributeValue::F64(f64) => dict.set_item(key.to_string(), f64)?,
-            AttributeValue::F32(f32) => dict.set_item(key.to_string(), f32)?,
-            AttributeValue::I32(i32) => dict.set_item(key.to_string(), i32)?,
-            _ => (),
-        }
-    }
-
     Ok(dict)
 }
 
-fn set_image_attributes(attributes: &mut ImageAttributes, dict: &Bound<PyDict>) -> PyResult<()> {
-    for (key, handler) in attributes::IMAGE_HANDLERS {
-        match dict.contains(key) {
-            Ok(true) => (handler.setter)(attributes, dict)?,
-            _ => (),
-        }
+fn attributes_from_pydict<'py>(
+    py: Python<'py>,
+    pydict: &Bound<'py, PyDict>,
+) -> PyResult<HashMap<Text, AttributeValue>> {
+    let mut attributes = HashMap::new();
+
+    for (key, value) in pydict.iter() {
+        let key_str = key.to_string();
+        match attributes::from_python(key_str.as_str(), &value, py) {
+            Ok(attribute_value) => {
+                attributes.insert(Text::from(key_str.as_str()), attribute_value);
+            }
+            Err(e) => return Err(e),
+        };
     }
 
-    for (key, value) in dict.iter() {
-        let key_str = key.to_string();
-        if attributes::IMAGE_HANDLERS
-            .iter()
-            .all(|(k, _)| k != &key_str)
-        {
-            let key_text = Text::from(key_str.as_str());
-            let value_text = Text::from(value.to_string().as_str());
-            let attribute_value = AttributeValue::Text(value_text);
-            attributes.other.insert(key_text, attribute_value);
-        }
+    println!("from_pydict attributes: {:?}", attributes);
+
+    Ok(attributes)
+}
+
+fn attributes_from_layer(layer_attributes: &LayerAttributes) -> HashMap<Text, AttributeValue> {
+    let mut attributes = layer_attributes.other.clone();
+
+    if let Some(layer_name) = &layer_attributes.layer_name {
+        attributes.insert(
+            Text::from("layer_name"),
+            AttributeValue::Text(layer_name.clone()),
+        );
     }
+
+    attributes
+}
+
+fn attributes_from_image(attributes: &ImageAttributes) -> HashMap<Text, AttributeValue> {
+    let mut image_attributes = attributes.other.clone();
+    image_attributes.insert(
+        Text::from("display_window"),
+        AttributeValue::IntegerBounds(attributes.display_window.clone()),
+    );
+    image_attributes.insert(
+        Text::from("pixel_aspect_ratio"),
+        AttributeValue::F32(attributes.pixel_aspect),
+    );
+
+    return image_attributes;
+}
+
+fn set_image_attributes(
+    image_attributes: &mut ImageAttributes,
+    _attributes: &HashMap<Text, AttributeValue>,
+) -> PyResult<()> {
+    let attributes = _attributes.clone();
+
+    image_attributes.other = attributes;
 
     Ok(())
 }
@@ -181,6 +205,7 @@ impl ExrLayer {
             width: None,
             height: None,
             pixels_f32: None,
+            attributes: HashMap::new(),
         }
     }
 
@@ -263,6 +288,10 @@ impl ExrLayer {
 
         Ok(())
     }
+
+    fn attributes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        pydict_from_attributes(py, &self.attributes)
+    }
 }
 
 #[pyclass]
@@ -282,11 +311,14 @@ impl ExrImage {
     }
 
     fn attributes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        get_image_attributes_dict(py, &self.attributes)
+        pydict_from_attributes(py, &attributes_from_image(&self.attributes))
     }
 
-    fn with_attributes(&mut self, dict: &Bound<PyDict>) -> PyResult<()> {
-        set_image_attributes(&mut self.attributes, dict)
+    fn with_attributes<'py>(&mut self, py: Python<'py>, dict: &Bound<PyDict>) -> PyResult<()> {
+        match attributes_from_pydict(py, dict) {
+            Ok(attributes) => set_image_attributes(&mut self.attributes, &attributes),
+            Err(e) => return Err(e),
+        }
     }
 
     fn layers(&self) -> Vec<ExrLayer> {

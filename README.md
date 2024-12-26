@@ -8,6 +8,13 @@
 - [Python](https://www.python.org/downloads/)
 - [maturin](https://maturin.rs)
 
+### Run Tests
+
+```bash
+uv sync
+uv run pytest
+```
+
 ### Run Examples
 
 ```bash

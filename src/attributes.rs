@@ -1,182 +1,182 @@
 use std::collections::HashMap;
 
-use attribute::Chromaticities;
-use exr::meta::attribute::TimeCode;
-use exr::prelude::*;
-use pyo3::{
-    conversion::{IntoPyObject, IntoPyObjectExt},
-    exceptions::PyIOError,
-    pyclass, pymethods, pymodule,
-    types::{PyAnyMethods, PyBytes, PyDict, PyDictMethods, PyModule, PyModuleMethods},
-    Bound, FromPyObject, Py, PyAny, PyErr, PyObject, PyResult, Python,
-};
+use exr::prelude::{AttributeValue, ImageAttributes, IntegerBounds, LayerAttributes, Result, Text};
 
-pub type AttributeValueSerializeFn =
-    for<'py> fn(&AttributeValue, Python<'py>) -> Option<PyResult<Py<PyAny>>>;
-pub type AttributeValueDeserializeFn =
-    for<'py> fn(&'py Bound<'py, PyAny>) -> PyResult<AttributeValue>;
-
-pub struct ImageAttributeHandler {
-    pub name: &'static str,
-    pub to_python: AttributeValueSerializeFn,
-    pub from_python: AttributeValueDeserializeFn,
-}
-
-fn extract_int(dict: &Bound<PyDict>, key: &str) -> PyResult<i32> {
-    match dict.get_item(key)? {
-        Some(value) => value
-            .extract::<i32>()
-            .map_err(|_| PyIOError::new_err(format!("{} invalid", key))),
-        None => Err(PyIOError::new_err(format!("{} not found", key))),
+fn extract_text(value: &AttributeValue) -> Option<Text> {
+    match value {
+        AttributeValue::Text(text) => Some(text.clone()),
+        _ => None,
     }
 }
 
-fn get_chromaticities_or_default(attrs: &mut ImageAttributes) -> Chromaticities {
-    let chromaticities = match attrs.chromaticities {
-        Some(chromaticities) => chromaticities,
-        None => {
-            attrs.chromaticities = Some(Chromaticities {
-                red: Vec2(0.64, 0.33),
-                green: Vec2(0.3, 0.6),
-                blue: Vec2(0.15, 0.06),
-                white: Vec2(0.3127, 0.329),
-            });
-            return attrs.chromaticities.unwrap();
-        }
-    };
-    attrs.chromaticities = Some(chromaticities);
-    chromaticities
+fn extract_f32(value: &AttributeValue) -> Option<f32> {
+    match value {
+        AttributeValue::F32(f32) => Some(f32.clone()),
+        _ => None,
+    }
 }
 
-fn get_timecode_or_default(attrs: &mut ImageAttributes) -> TimeCode {
-    let timecode = match attrs.time_code {
-        Some(timecode) => timecode,
-        None => TimeCode {
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-            frame: 0,
-            drop_frame: false,
-            color_frame: false,
-            field_phase: false,
-            binary_group_flags: [false, false, false],
-            binary_groups: [0, 0, 0, 0, 0, 0, 0, 0],
-        },
-    };
-
-    attrs.time_code = Some(timecode);
-    timecode
+struct LayerAttributeHandler<T> {
+    name: &'static str,
+    extract: fn(&AttributeValue) -> Option<T>,
+    get: fn(&LayerAttributes) -> Option<AttributeValue>,
+    set: fn(&mut LayerAttributes, T) -> Result<()>,
 }
 
-pub const IMAGE_HANDLERS: &[ImageAttributeHandler] = &[
-    ImageAttributeHandler {
-        name: "f32",
-        to_python: |value, py| match value {
-            AttributeValue::F32(f32) => Some(f32.into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<f32>() {
-            Ok(value) => Ok(AttributeValue::F32(value)),
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+const FLOAT_LAYER_ATTRIBUTES: &[LayerAttributeHandler<f32>] = &[
+    LayerAttributeHandler {
+        name: "screen_window_width",
+        extract: extract_f32,
+        get: |attrs| Some(AttributeValue::F32(attrs.screen_window_width.clone())),
+        set: |attrs, value| {
+            attrs.screen_window_width = value;
+            Ok(())
         },
     },
-    ImageAttributeHandler {
-        name: "text",
-        to_python: |value, py| match value {
-            AttributeValue::Text(text) => Some(text.to_string().into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<String>() {
-            Ok(value) => Ok(AttributeValue::Text(Text::from(value.as_str()))),
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
-        },
-    },
-    ImageAttributeHandler {
-        name: "integer_bounds",
-        to_python: |value, py| match value {
-            AttributeValue::IntegerBounds(bounds) => Some(
-                format!(
-                    "{:?}-{:?}-{:?}-{:?}",
-                    bounds.position.0, bounds.position.1, bounds.size.0, bounds.size.1
-                )
-                .into_py_any(py),
-            ),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<String>() {
-            Ok(value) => {
-                let values = value
-                    .split('-')
-                    .flat_map(|s| s.parse::<i32>())
-                    .collect::<Vec<i32>>();
-
-                if values.len() != 4 {
-                    return Err(PyIOError::new_err("Invalid integer bounds"));
-                }
-
-                Ok(AttributeValue::IntegerBounds(IntegerBounds {
-                    position: Vec2(values[0], values[1]),
-                    size: Vec2(values[2] as usize, values[3] as usize),
-                }))
-            }
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+    LayerAttributeHandler {
+        name: "utc_offset",
+        extract: extract_f32,
+        get: |attrs| attrs.utc_offset.map(|value| AttributeValue::F32(value)),
+        set: |attrs, value| {
+            attrs.utc_offset = Some(value);
+            Ok(())
         },
     },
 ];
 
-pub fn to_python(key: &str, value: &AttributeValue, py: Python) -> PyResult<Py<PyAny>> {
-    let mut last_error: Option<PyErr> = None;
-    for handler in IMAGE_HANDLERS {
-        match (handler.to_python)(value, py) {
-            Some(value) => match value {
-                Ok(value) => return Ok(value),
-                Err(e) => last_error = Some(e),
+const TEXT_LAYER_ATTRIBUTES: &[LayerAttributeHandler<Text>] = &[
+    LayerAttributeHandler {
+        name: "layer_name",
+        extract: extract_text,
+        get: |attrs| {
+            attrs
+                .layer_name
+                .as_ref()
+                .map(|value| AttributeValue::Text(value.clone()))
+        },
+        set: |attrs, value| {
+            attrs.layer_name = Some(value);
+            Ok(())
+        },
+    },
+    LayerAttributeHandler {
+        name: "owner",
+        extract: extract_text,
+        get: |attrs| {
+            attrs
+                .owner
+                .as_ref()
+                .map(|value| AttributeValue::Text(value.clone()))
+        },
+        set: |attrs, value| {
+            attrs.layer_name = Some(value);
+            Ok(())
+        },
+    },
+];
+
+pub fn attributes_from_layer(layer_attributes: &LayerAttributes) -> HashMap<Text, AttributeValue> {
+    let mut attributes = layer_attributes.other.clone();
+
+    for handler in FLOAT_LAYER_ATTRIBUTES {
+        if let Some(value) = (handler.get)(layer_attributes) {
+            attributes.insert(Text::from(handler.name), value);
+        }
+    }
+
+    if let Some(layer_name) = &layer_attributes.layer_name {
+        attributes.insert(
+            Text::from("layer_name"),
+            AttributeValue::Text(layer_name.clone()),
+        );
+    }
+
+    attributes
+}
+
+pub fn layer_attributes_from_attributes(
+    layer_attributes: &mut LayerAttributes,
+    attributes: &HashMap<Text, AttributeValue>,
+) -> Result<()> {
+    let mut attributes = attributes.clone();
+
+    for handler in FLOAT_LAYER_ATTRIBUTES {
+        let extracted_value = attributes
+            .remove(&Text::from(handler.name))
+            .map(|value| (handler.extract)(&value))
+            .flatten();
+
+        if let Some(value) = extracted_value {
+            match (handler.set)(layer_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    Ok(())
+}
+
+struct ImageAttributeHandler {
+    name: &'static str,
+    get: fn(&ImageAttributes) -> Option<AttributeValue>,
+    set: fn(&mut ImageAttributes, AttributeValue) -> Result<()>,
+}
+
+const IMAGE_ATTRIBUTES: &[ImageAttributeHandler] = &[
+    ImageAttributeHandler {
+        name: "display_window",
+        get: |attrs| Some(AttributeValue::IntegerBounds(attrs.display_window.clone())),
+        set: |attrs, value| {
+            if let AttributeValue::IntegerBounds(bounds) = value {
+                attrs.display_window = bounds;
+            }
+
+            Ok(())
+        },
+    },
+    ImageAttributeHandler {
+        name: "pixel_aspect_ratio",
+        get: |attrs| Some(AttributeValue::F32(attrs.pixel_aspect.clone())),
+        set: |attrs, value| {
+            if let AttributeValue::F32(pixel_aspect) = value {
+                attrs.pixel_aspect = pixel_aspect;
+            }
+
+            Ok(())
+        },
+    },
+];
+
+pub fn attributes_from_image(attributes: &ImageAttributes) -> HashMap<Text, AttributeValue> {
+    let mut image_attributes = attributes.other.clone();
+
+    for handler in IMAGE_ATTRIBUTES {
+        if let Some(value) = (handler.get)(attributes) {
+            image_attributes.insert(Text::from(handler.name), value);
+        }
+    }
+
+    return image_attributes;
+}
+
+pub fn image_attributes_from_attributes(
+    image_attributes: &mut ImageAttributes,
+    _attributes: &HashMap<Text, AttributeValue>,
+) -> Result<()> {
+    let mut attributes = _attributes.clone();
+
+    for handler in IMAGE_ATTRIBUTES {
+        match attributes.remove(&Text::from(handler.name)) {
+            Some(value) => match (handler.set)(image_attributes, value) {
+                Ok(_) => (),
+                Err(e) => return Err(e),
             },
             None => (),
         }
     }
 
-    let mut debug_string = String::new();
-    for handler in IMAGE_HANDLERS {
-        debug_string.push_str(handler.name);
-        debug_string.push_str(", ");
-    }
+    image_attributes.other = attributes;
 
-    if last_error.is_some() {
-        debug_string.push_str(&last_error.unwrap().value(py).to_string());
-    }
-
-    Err(PyIOError::new_err(format!(
-        "No matching attribute value serializer for {}. Last error: {}",
-        key, debug_string
-    )))
-}
-
-pub fn from_python<'py>(
-    key: &str,
-    value: &Bound<'py, PyAny>,
-    py: Python<'py>,
-) -> PyResult<AttributeValue> {
-    let mut last_error: Option<PyErr> = None;
-    for handler in IMAGE_HANDLERS {
-        match (handler.from_python)(value) {
-            Ok(value) => return Ok(value),
-            Err(e) => last_error = Some(e),
-        }
-    }
-
-    let mut debug_string = String::new();
-    for handler in IMAGE_HANDLERS {
-        debug_string.push_str(handler.name);
-        debug_string.push_str(", ");
-    }
-
-    if last_error.is_some() {
-        debug_string.push_str(&last_error.unwrap().value(py).to_string());
-    }
-
-    Err(PyIOError::new_err(format!(
-        "No matching attribute value deserializer for {}. Last error: {}",
-        key, debug_string
-    )))
+    Ok(())
 }

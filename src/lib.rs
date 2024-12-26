@@ -17,8 +17,11 @@ use pyo3::{
     Bound, FromPyObject, PyAny, PyObject, PyResult, Python,
 };
 
+mod pyattributes;
+use pyattributes::{from_python, to_python, AttributeValueHandler, IMAGE_HANDLERS};
+
 mod attributes;
-use attributes::{from_python, to_python, ImageAttributeHandler, IMAGE_HANDLERS};
+use attributes::{attributes_from_image, attributes_from_layer, image_attributes_from_attributes};
 
 fn get_image_reader() -> ReadImage<fn(f64), ReadAllLayers<ReadAnyChannels<ReadFlatSamples>>> {
     let image = read()
@@ -74,9 +77,12 @@ fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
 
     let image_with_channels = Image::from_channels(Vec2(*width, *height), channels_builder);
 
+    let mut attributes = LayerAttributes::named(Text::from(name.as_str()));
+    let _ = attributes::layer_attributes_from_attributes(&mut attributes, &layer.attributes);
+
     let layer_out = Layer::new(
         Vec2(*width, *height),
-        LayerAttributes::named(Text::from(name.as_str())),
+        attributes,
         Encoding::FAST_LOSSLESS,
         image_with_channels.layer_data.channel_data,
     );
@@ -121,77 +127,6 @@ fn layer_from_exr(exr_layer: Layer<AnyChannels<FlatSamples>>) -> ExrLayer {
         pixels_f32,
         attributes,
     }
-}
-
-fn pydict_from_attributes<'py>(
-    py: Python<'py>,
-    attributes: &HashMap<Text, AttributeValue>,
-) -> PyResult<Bound<'py, PyDict>> {
-    let dict = PyDict::new(py);
-    for (key, value) in attributes.iter() {
-        let py_value = attributes::to_python(key.to_string().as_str(), value, py)?;
-        dict.set_item(key.to_string(), py_value)?;
-    }
-    Ok(dict)
-}
-
-fn attributes_from_pydict<'py>(
-    py: Python<'py>,
-    pydict: &Bound<'py, PyDict>,
-) -> PyResult<HashMap<Text, AttributeValue>> {
-    let mut attributes = HashMap::new();
-
-    for (key, value) in pydict.iter() {
-        let key_str = key.to_string();
-        match attributes::from_python(key_str.as_str(), &value, py) {
-            Ok(attribute_value) => {
-                attributes.insert(Text::from(key_str.as_str()), attribute_value);
-            }
-            Err(e) => return Err(e),
-        };
-    }
-
-    println!("from_pydict attributes: {:?}", attributes);
-
-    Ok(attributes)
-}
-
-fn attributes_from_layer(layer_attributes: &LayerAttributes) -> HashMap<Text, AttributeValue> {
-    let mut attributes = layer_attributes.other.clone();
-
-    if let Some(layer_name) = &layer_attributes.layer_name {
-        attributes.insert(
-            Text::from("layer_name"),
-            AttributeValue::Text(layer_name.clone()),
-        );
-    }
-
-    attributes
-}
-
-fn attributes_from_image(attributes: &ImageAttributes) -> HashMap<Text, AttributeValue> {
-    let mut image_attributes = attributes.other.clone();
-    image_attributes.insert(
-        Text::from("display_window"),
-        AttributeValue::IntegerBounds(attributes.display_window.clone()),
-    );
-    image_attributes.insert(
-        Text::from("pixel_aspect_ratio"),
-        AttributeValue::F32(attributes.pixel_aspect),
-    );
-
-    return image_attributes;
-}
-
-fn set_image_attributes(
-    image_attributes: &mut ImageAttributes,
-    _attributes: &HashMap<Text, AttributeValue>,
-) -> PyResult<()> {
-    let attributes = _attributes.clone();
-
-    image_attributes.other = attributes;
-
-    Ok(())
 }
 
 #[pymethods]
@@ -290,7 +225,20 @@ impl ExrLayer {
     }
 
     fn attributes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        pydict_from_attributes(py, &self.attributes)
+        pyattributes::pydict_from_attributes(py, &self.attributes)
+    }
+
+    fn with_attributes<'py>(&mut self, py: Python<'py>, dict: &Bound<PyDict>) -> PyResult<()> {
+        match pyattributes::attributes_from_pydict(py, dict) {
+            Ok(attributes) => {
+                for (key, value) in attributes.iter() {
+                    self.attributes.insert(key.clone(), value.clone());
+                }
+            }
+            Err(e) => return Err(e),
+        }
+
+        Ok(())
     }
 }
 
@@ -311,12 +259,13 @@ impl ExrImage {
     }
 
     fn attributes<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
-        pydict_from_attributes(py, &attributes_from_image(&self.attributes))
+        pyattributes::pydict_from_attributes(py, &attributes_from_image(&self.attributes))
     }
 
     fn with_attributes<'py>(&mut self, py: Python<'py>, dict: &Bound<PyDict>) -> PyResult<()> {
-        match attributes_from_pydict(py, dict) {
-            Ok(attributes) => set_image_attributes(&mut self.attributes, &attributes),
+        match pyattributes::attributes_from_pydict(py, dict) {
+            Ok(attributes) => image_attributes_from_attributes(&mut self.attributes, &attributes)
+                .map_err(|e| PyIOError::new_err(e.to_string())),
             Err(e) => return Err(e),
         }
     }

@@ -26,4 +26,8 @@ dev = [
 ]
 
 [tool.maturin]
+python-source = "src"
+python-packages = ["exrio"]
 features = ["pyo3/extension-module"]
+module-name = "exrio._rust"
+manifest-path = "rust/Cargo.toml"

@@ -1,7 +1,8 @@
 import tempfile
 
 import numpy as np
-from exrio import ExrImage, ExrLayer
+
+from exrio._rust import ExrImage, ExrLayer
 
 
 def test_basic_exr_roundtrip():

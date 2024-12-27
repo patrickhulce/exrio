@@ -318,6 +318,7 @@ impl ExrImage {
 }
 
 #[pymodule]
+#[pyo3(name = "_rust")]
 fn exrio<'py>(m: &Bound<'py, PyModule>) -> PyResult<()> {
     m.add_class::<ExrImage>()?;
     m.add_class::<ExrLayer>()?;

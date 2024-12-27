@@ -16,6 +16,15 @@ use pyo3::{
     types::{PyAnyMethods, PyBytes, PyDict, PyDictMethods, PyModule, PyModuleMethods},
     Bound, FromPyObject, PyAny, PyObject, PyResult, Python,
 };
+use std::io::{self, BufWriter, Cursor, Write};
+use std::vec::Vec;
+
+fn get_inmemory_writer() -> BufWriter<Cursor<Vec<u8>>> {
+    let buffer = Vec::new();
+    let cursor = Cursor::new(buffer);
+
+    BufWriter::new(cursor)
+}
 
 mod pyattributes;
 use pyattributes::{from_python, to_python, AttributeValueHandler, IMAGE_HANDLERS};
@@ -278,6 +287,31 @@ impl ExrImage {
         self.layers.push(layer);
     }
 
+    fn save_to_buffer<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyBytes>> {
+        let first_layer = self.layers.first().unwrap();
+        let rust_layers: Vec<Layer<AnyChannels<FlatSamples>>> = self
+            .layers
+            .iter()
+            .flat_map(|layer| to_rust_layer(layer))
+            .collect();
+
+        let mut attributes = self.attributes.clone();
+        attributes.display_window.size.0 = first_layer.width.unwrap();
+        attributes.display_window.size.1 = first_layer.height.unwrap();
+
+        let image = Image::from_layers(attributes, rust_layers);
+        let mut writer = get_inmemory_writer();
+        match image.write().to_buffered(&mut writer) {
+            Ok(_) => (),
+            Err(e) => return Err(PyIOError::new_err(e.to_string())),
+        }
+
+        match writer.into_inner() {
+            Ok(buffer) => Ok(PyBytes::new(py, buffer.into_inner().as_slice())),
+            Err(e) => Err(PyIOError::new_err(e.to_string())),
+        }
+    }
+
     fn save_to_path<'py>(&self, py: Python<'py>, file_path: &str) -> PyResult<()> {
         let first_layer = self.layers.first().unwrap();
         let rust_layers: Vec<Layer<AnyChannels<FlatSamples>>> = self
@@ -296,6 +330,26 @@ impl ExrImage {
             .map_err(|e| PyIOError::new_err(e.to_string()))?;
 
         Ok(())
+    }
+
+    #[staticmethod]
+    fn load_from_buffer<'py>(py: Python<'py>, buffer: &Bound<'py, PyBytes>) -> PyResult<ExrImage> {
+        let bytes: &[u8] = buffer.extract::<&[u8]>()?;
+        let cursor = Cursor::new(bytes);
+        let image = match get_image_reader().from_buffered(cursor) {
+            Ok(image) => image,
+            Err(e) => return Err(PyIOError::new_err(e.to_string())),
+        };
+
+        let mut layers: Vec<ExrLayer> = Vec::new();
+        for layer in image.layer_data {
+            layers.push(layer_from_exr(layer));
+        }
+
+        Ok(ExrImage {
+            layers,
+            attributes: image.attributes,
+        })
     }
 
     #[staticmethod]

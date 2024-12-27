@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any
+from typing import Any, Union
 
 import numpy as np
 
@@ -43,6 +43,16 @@ class ExrLayer:
     channels: list[ExrChannel]
     attributes: dict[str, Any]
 
+    def _to_rust(self) -> RustLayer:
+        layer = RustLayer(name=self.name)
+        layer.with_width(self.width)
+        layer.with_height(self.height)
+        layer.with_attributes(self.attributes)
+        for channel in self.channels:
+            pixels = channel.pixels.flatten().astype(np.float32)
+            layer.with_channel_f32(channel=channel.name, pixels=pixels.copy(order="C"))
+        return layer
+
     @staticmethod
     def _from_rust(rust_layer: RustLayer) -> "ExrLayer":
         name = rust_layer.name() or "unknown"
@@ -53,14 +63,15 @@ class ExrLayer:
         height = rust_layer.height()
         assert height is not None
 
+        channel_names = rust_layer.channels()
         channel_pixels = _pixels_from_layer(rust_layer)
-        assert len(rust_layer.channels()) == len(
+        assert len(channel_names) == len(
             channel_pixels
-        ), f"expected {len(rust_layer.channels())} channels, got {len(channel_pixels)}"
+        ), f"expected {len(channel_names)} channels, got {len(channel_pixels)}"
 
         channels = [
             ExrChannel._from_rust(channel, width, height, pixels)
-            for channel, pixels in zip(rust_layer.channels(), channel_pixels)
+            for channel, pixels in zip(channel_names, channel_pixels)
         ]
 
         return ExrLayer(
@@ -77,6 +88,16 @@ class ExrImage:
     layers: list[ExrLayer]
     attributes: dict[str, Any]
 
+    def _to_rust(self) -> RustImage:
+        image = RustImage()
+        image.with_attributes(self.attributes)
+        for layer in self.layers:
+            image.with_layer(layer._to_rust())
+        return image
+
+    def save(self) -> bytes:
+        return self._to_rust().save_to_buffer()
+
     @staticmethod
     def _from_rust(rust_image: RustImage) -> "ExrImage":
         return ExrImage(
@@ -85,7 +106,9 @@ class ExrImage:
         )
 
 
-def load(buffer: BytesIO) -> ExrImage:
+def load(buffer: Union[BytesIO, bytes]) -> ExrImage:
+    if isinstance(buffer, bytes):
+        buffer = BytesIO(buffer)
     return ExrImage._from_rust(RustImage.load_from_buffer(buffer.getvalue()))
 
 

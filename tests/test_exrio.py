@@ -1,5 +1,3 @@
-import tempfile
-
 import numpy as np
 
 from exrio._rust import ExrImage, ExrLayer
@@ -37,31 +35,6 @@ def _create_test_image(layers: list[ExrLayer], metadata: dict[str, str]):
         image.with_layer(layer)
     image.with_attributes(metadata)
     return image
-
-
-def test_basic_exr_roundtrip():
-    r_channel, g_channel, b_channel = _create_test_channels()
-
-    layer = _create_test_layer("test_layer", (r_channel, g_channel, b_channel))
-    image = _create_test_image([layer], {"test_attr": "test_value", "number": "42"})
-
-    with tempfile.NamedTemporaryFile(suffix=".exr") as f:
-        test_file = f.name
-        image.save_to_path(test_file)
-
-        read_image = ExrImage.load_from_path(test_file)
-        read_layer = read_image.layers()[0]
-
-    layer_attributes = read_layer.attributes()
-    assert layer_attributes["test_attr"] == "test_value"
-    assert layer_attributes["number"] == "42"
-
-    assert read_layer.name() == "test_layer"
-    assert read_layer.width() == 2
-    assert read_layer.height() == 2
-
-    read_red_channel = read_layer.pixels_f32()[2]  # Saved as BGR, not RGB
-    np.testing.assert_array_almost_equal(read_red_channel, r_channel.reshape(-1))
 
 
 def test_basic_exr_roundtrip_buffer():

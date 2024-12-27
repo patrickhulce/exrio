@@ -312,49 +312,11 @@ impl ExrImage {
         }
     }
 
-    fn save_to_path<'py>(&self, py: Python<'py>, file_path: &str) -> PyResult<()> {
-        let first_layer = self.layers.first().unwrap();
-        let rust_layers: Vec<Layer<AnyChannels<FlatSamples>>> = self
-            .layers
-            .iter()
-            .flat_map(|layer| to_rust_layer(layer))
-            .collect();
-
-        let mut attributes = self.attributes.clone();
-        attributes.display_window.size.0 = first_layer.width.unwrap();
-        attributes.display_window.size.1 = first_layer.height.unwrap();
-
-        Image::from_layers(attributes, rust_layers)
-            .write()
-            .to_file(file_path)
-            .map_err(|e| PyIOError::new_err(e.to_string()))?;
-
-        Ok(())
-    }
-
     #[staticmethod]
     fn load_from_buffer<'py>(py: Python<'py>, buffer: &Bound<'py, PyBytes>) -> PyResult<ExrImage> {
         let bytes: &[u8] = buffer.extract::<&[u8]>()?;
         let cursor = Cursor::new(bytes);
         let image = match get_image_reader().from_buffered(cursor) {
-            Ok(image) => image,
-            Err(e) => return Err(PyIOError::new_err(e.to_string())),
-        };
-
-        let mut layers: Vec<ExrLayer> = Vec::new();
-        for layer in image.layer_data {
-            layers.push(layer_from_exr(layer));
-        }
-
-        Ok(ExrImage {
-            layers,
-            attributes: image.attributes,
-        })
-    }
-
-    #[staticmethod]
-    fn load_from_path(file_path: &str) -> PyResult<ExrImage> {
-        let image = match get_image_reader().from_file(file_path) {
             Ok(image) => image,
             Err(e) => return Err(PyIOError::new_err(e.to_string())),
         };

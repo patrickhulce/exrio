@@ -42,9 +42,9 @@ def create_test_image():
     layer = RustLayer("test")
     layer.with_width(1024)
     layer.with_height(1024)
-    layer.with_channel_f32("R", pixels)
-    layer.with_channel_f32("G", pixels)
-    layer.with_channel_f32("B", pixels)
+    layer.with_channel("R", pixels)
+    layer.with_channel("G", pixels)
+    layer.with_channel("B", pixels)
 
     image = RustImage()
     image.with_layer(layer)

@@ -22,9 +22,9 @@ def _create_test_layer(name: str, channels: tuple[np.ndarray, np.ndarray, np.nda
     layer = ExrLayer(name)
     layer.with_width(2)
     layer.with_height(2)
-    layer.with_channel_f32("R", r_channel.reshape(-1).copy())
-    layer.with_channel_f32("G", g_channel.reshape(-1).copy())
-    layer.with_channel_f32("B", b_channel.reshape(-1).copy())
+    layer.with_channel("R", r_channel.reshape(-1).copy())
+    layer.with_channel("G", g_channel.reshape(-1).copy())
+    layer.with_channel("B", b_channel.reshape(-1).copy())
 
     return layer
 
@@ -56,5 +56,5 @@ def test_basic_exr_roundtrip_buffer():
     assert read_layer.width() == 2
     assert read_layer.height() == 2
 
-    read_red_channel = read_layer.pixels_f32()[2]  # Saved as BGR, not RGB
+    read_red_channel = read_layer.pixels()[2]  # Saved as BGR, not RGB
     np.testing.assert_array_almost_equal(read_red_channel, r_channel.reshape(-1))

@@ -77,6 +77,7 @@ name = "exrio"
 version = "0.1.0"
 dependencies = [
  "exr",
+ "half",
  "numpy",
  "pyo3",
  "serde",
@@ -204,6 +205,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b94caae805f998a07d33af06e6a3891e38556051b8045c615470a71590e13e78"
 dependencies = [
+ "half",
  "libc",
  "ndarray",
  "num-complex",

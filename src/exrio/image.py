@@ -9,7 +9,7 @@ from exrio._rust import ExrLayer as RustLayer
 
 
 def _pixels_from_layer(layer: RustLayer) -> list[np.ndarray]:
-    pixels = layer.pixels_f32()
+    pixels = layer.pixels()
     assert pixels is not None
     return [
         pixels[i].reshape(layer.height(), layer.width()) for i in range(len(pixels))
@@ -50,7 +50,7 @@ class ExrLayer:
         layer.with_attributes(self.attributes)
         for channel in self.channels:
             pixels = channel.pixels.flatten().astype(np.float32)
-            layer.with_channel_f32(channel=channel.name, pixels=pixels.copy(order="C"))
+            layer.with_channel(channel=channel.name, pixels=pixels.copy(order="C"))
         return layer
 
     @staticmethod
@@ -88,15 +88,15 @@ class ExrImage:
     layers: list[ExrLayer]
     attributes: dict[str, Any]
 
+    def save(self) -> bytes:
+        return self._to_rust().save_to_buffer()
+
     def _to_rust(self) -> RustImage:
         image = RustImage()
         image.with_attributes(self.attributes)
         for layer in self.layers:
             image.with_layer(layer._to_rust())
         return image
-
-    def save(self) -> bytes:
-        return self._to_rust().save_to_buffer()
 
     @staticmethod
     def _from_rust(rust_image: RustImage) -> "ExrImage":

@@ -1,5 +1,7 @@
 # exrio
 
+Fast and dependency-free python library for reading and writing OpenEXR files.
+
 ## Development
 
 ### Install Tools

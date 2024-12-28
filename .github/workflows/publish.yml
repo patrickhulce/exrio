@@ -7,21 +7,22 @@ on:
 
 jobs:
   macos:
-    runs-on: macos-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.9
-          architecture: x64
+          architecture: arm64
       - uses: dtolnay/rust-toolchain@stable
-      - name: Build wheels - x86_64
+      - name: Build wheels - arm64
         uses: PyO3/maturin-action@v1
         with:
-          target: x86_64
+          target: arm64
           args: --release --out dist --sdist -m rust/Cargo.toml
-      - name: Install built wheel - x86_64
+      - name: Install built wheel - arm64
         run: |
+          pip install "numpy<2"
           pip install exrio --no-index --find-links dist --force-reinstall
           python -c "import exrio"
       - name: Build wheels - universal2
@@ -31,6 +32,7 @@ jobs:
           args: --release --out dist -m rust/Cargo.toml
       - name: Install built wheel - universal2
         run: |
+          pip install "numpy<2"
           pip install exrio --no-index --find-links dist --force-reinstall
           python -c "import exrio"
       - name: Upload wheels
@@ -46,7 +48,7 @@ jobs:
         target: [x64, x86]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: 3.9
           architecture: ${{ matrix.target }}
@@ -58,6 +60,7 @@ jobs:
           args: --release --out dist -m rust/Cargo.toml
       - name: Install built wheel
         run: |
+          pip install "numpy<2"
           pip install exrio --no-index --find-links dist --force-reinstall
           python -c "import exrio"
       - name: Upload wheels
@@ -73,7 +76,7 @@ jobs:
         target: [x86_64, i686]
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-python@v4
+    - uses: actions/setup-python@v5
       with:
         python-version: 3.9
         architecture: x64
@@ -86,6 +89,7 @@ jobs:
     - name: Install built wheel
       if: matrix.target == 'x86_64'
       run: |
+        pip install "numpy<2"
         pip install exrio --no-index --find-links dist --force-reinstall
         python -c "import exrio"
     - name: Upload wheels

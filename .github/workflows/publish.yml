@@ -105,9 +105,7 @@ jobs:
           path: dist
           merge-multiple: True
       - name: Debug Directory Contents
-        run: |
-          ls -l
-          ls -l dist
+        run: ls -l dist
       - name: publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

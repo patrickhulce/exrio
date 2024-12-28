@@ -49,7 +49,8 @@ class ExrLayer:
         layer.with_height(self.height)
         layer.with_attributes(self.attributes)
         for channel in self.channels:
-            pixels = channel.pixels.flatten().astype(np.float32)
+            assert channel.pixels.dtype in [np.float16, np.float32, np.uint32]
+            pixels = channel.pixels.flatten()
             layer.with_channel(channel=channel.name, pixels=pixels.copy(order="C"))
         return layer
 

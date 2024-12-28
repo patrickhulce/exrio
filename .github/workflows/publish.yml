@@ -93,8 +93,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [ macos, windows, linux ]
     environment:
-      name: pypi-test
-      url: https://test.pypi.org/p/exrio
+      name: pypi
+      url: https://pypi.org/p/exrio
     permissions:
       id-token: write
     steps:
@@ -108,5 +108,3 @@ jobs:
         run: ls -l dist
       - name: publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          repository-url: https://test.pypi.org/legacy/

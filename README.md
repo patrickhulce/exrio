@@ -21,3 +21,7 @@ uv run pytest
 uv sync
 uv run examples/test.py
 ```
+
+### Publish
+
+Create an account on [test.pypi.org](https://test.pypi.org) and register your GitHub OIDC provider on [Publishing](https://test.pypi.org/manage/account/publishing/).

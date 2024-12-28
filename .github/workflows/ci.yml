@@ -25,4 +25,4 @@ jobs:
       - run: uv pip install --python=${{ matrix.python-version }} pip
       - run: uv sync --frozen
       - run: uv run pytest
-      - run: cargo fmt --all -- --check
+      - run: cd rust && cargo fmt --all -- --check

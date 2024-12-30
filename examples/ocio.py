@@ -3,8 +3,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import PyOpenColorIO as OCIO
+from scipy.ndimage import zoom
 
-from exrio import ExrImage
+from exrio import Colorspace, ExrImage
 
 ACES_CONFIG = "studio-config-v1.0.0_aces-v1.3_ocio-v2.1"
 
@@ -31,6 +32,7 @@ def convert_to_acescg(pixels: np.ndarray, output_path: Path):
 
     acesscg_image = ExrImage.from_pixels_ACEScg(acesscg_pixels)
     acesscg_image.to_path(output_path)
+    write_thumbnail(acesscg_image, output_path, Colorspace.ACEScg)
     return acesscg_pixels
 
 
@@ -45,6 +47,7 @@ def convert_to_acescct(pixels: np.ndarray, output_path: Path):
 
     acesscct_image = ExrImage.from_pixels_ACEScct(acesscct_pixels)
     acesscct_image.to_path(output_path)
+    write_thumbnail(acesscct_image, output_path, Colorspace.ACEScct)
     return acesscct_pixels
 
 
@@ -62,6 +65,7 @@ def convert_to_srgb(pixels: np.ndarray, output_path: Path):
 
     srgb_image = ExrImage.from_pixels(srgb_pixels)
     srgb_image.to_path(output_path)
+    write_thumbnail(srgb_image, output_path, Colorspace.sRGB)
     return srgb_pixels
 
 
@@ -103,6 +107,29 @@ def plot_image_and_histogram(images_and_labels: list[tuple[np.ndarray, str]]):
     plt.show()
 
 
+def write_thumbnail(image: ExrImage, original_path: Path, colorspace: Colorspace):
+    """Create a 64x64 thumbnail version of an EXR image.
+
+    Args:
+        image: The ExrImage to create a thumbnail from
+        original_path: Path to the original file, used to generate thumbnail path
+        colorspace: The colorspace of the image ('ACEScg', 'ACEScct', or None for default)
+    """
+    pixels = image.to_pixels()
+    # Ensure pixels are float32 before zooming
+    pixels = pixels.astype(np.float32)
+
+    height, width, channels = pixels.shape
+    zoom_y = 64.0 / height
+    zoom_x = 64.0 / width
+    min_zoom = min(zoom_y, zoom_x)
+    thumb_pixels = zoom(pixels, (min_zoom, min_zoom, 1), order=1)
+
+    thumb_image = ExrImage.from_pixels(thumb_pixels, colorspace)
+    thumb_path = original_path.parent / (original_path.stem + ".thumb.exr")
+    thumb_image.to_path(thumb_path)
+
+
 def main():
     examples_dir = Path(__file__).parent.parent / ".data" / "examples-v20241230"
     output_dir = Path(__file__).parent.parent / ".data" / "out"
@@ -112,6 +139,8 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     image.to_path(output_dir / "out_original.exr")
+    write_thumbnail(image, output_dir / "out_original.exr", Colorspace.ACES)
+
     acescg_pixels = convert_to_acescg(pixels, output_dir / "out_acescg.exr")
     acescct_pixels = convert_to_acescct(pixels, output_dir / "out_acescct.exr")
     srgb_pixels = convert_to_srgb(pixels, output_dir / "out_srgb.exr")

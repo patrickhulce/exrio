@@ -28,7 +28,7 @@ fn get_inmemory_writer() -> BufWriter<Cursor<Vec<u8>>> {
 }
 
 mod pyattributes;
-use pyattributes::{from_python, to_python, AttributeValueHandler, IMAGE_HANDLERS};
+use pyattributes::{from_python, to_python, AttributeValueHandler, ATTRIBUTE_HANDLERS};
 
 mod attributes;
 use attributes::{attributes_from_image, attributes_from_layer, image_attributes_from_attributes};

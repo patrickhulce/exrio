@@ -79,29 +79,7 @@ fn get_timecode_or_default(attrs: &mut ImageAttributes) -> TimeCode {
     timecode
 }
 
-pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
-    AttributeValueHandler {
-        name: "f32",
-        to_python: |value, py| match value {
-            AttributeValue::F32(f32) => Some(f32.into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<f32>() {
-            Ok(value) => Ok(AttributeValue::F32(value)),
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
-        },
-    },
-    AttributeValueHandler {
-        name: "text",
-        to_python: |value, py| match value {
-            AttributeValue::Text(text) => Some(text.to_string().into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<String>() {
-            Ok(value) => Ok(AttributeValue::Text(Text::from(value.as_str()))),
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
-        },
-    },
+pub const ATTRIBUTE_HANDLERS: &[AttributeValueHandler] = &[
     AttributeValueHandler {
         name: "timecode",
         to_python: |value, py| match value {
@@ -161,39 +139,6 @@ pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
                     Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
                 }
             }
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
-        },
-    },
-    AttributeValueHandler {
-        name: "integer",
-        to_python: |value, py| match value {
-            AttributeValue::I32(integer) => Some(integer.into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<i32>() {
-            Ok(value) => Ok(AttributeValue::I32(value)),
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
-        },
-    },
-    AttributeValueHandler {
-        name: "intvec2",
-        to_python: |value, py| match value {
-            AttributeValue::IntVec2(vec) => Some([vec.0, vec.1].into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<Vec<i32>>() {
-            Ok(value) => Ok(AttributeValue::IntVec2(Vec2(value[0], value[1]))),
-            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
-        },
-    },
-    AttributeValueHandler {
-        name: "floatvec2",
-        to_python: |value, py| match value {
-            AttributeValue::FloatVec2(vec) => Some([vec.0, vec.1].into_py_any(py)),
-            _ => None,
-        },
-        from_python: |value| match value.extract::<Vec<f32>>() {
-            Ok(value) => Ok(AttributeValue::FloatVec2(Vec2(value[0], value[1]))),
             Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
         },
     },
@@ -280,11 +225,66 @@ pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
             Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
         },
     },
+    AttributeValueHandler {
+        name: "f32",
+        to_python: |value, py| match value {
+            AttributeValue::F32(f32) => Some(f32.into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<f32>() {
+            Ok(value) => Ok(AttributeValue::F32(value)),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "text",
+        to_python: |value, py| match value {
+            AttributeValue::Text(text) => Some(text.to_string().into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<String>() {
+            Ok(value) => Ok(AttributeValue::Text(Text::from(value.as_str()))),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "integer",
+        to_python: |value, py| match value {
+            AttributeValue::I32(integer) => Some(integer.into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<i32>() {
+            Ok(value) => Ok(AttributeValue::I32(value)),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "intvec2",
+        to_python: |value, py| match value {
+            AttributeValue::IntVec2(vec) => Some([vec.0, vec.1].into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<Vec<i32>>() {
+            Ok(value) => Ok(AttributeValue::IntVec2(Vec2(value[0], value[1]))),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
+    AttributeValueHandler {
+        name: "floatvec2",
+        to_python: |value, py| match value {
+            AttributeValue::FloatVec2(vec) => Some([vec.0, vec.1].into_py_any(py)),
+            _ => None,
+        },
+        from_python: |value| match value.extract::<Vec<f32>>() {
+            Ok(value) => Ok(AttributeValue::FloatVec2(Vec2(value[0], value[1]))),
+            Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
+        },
+    },
 ];
 
 pub fn to_python(key: &str, value: &AttributeValue, py: Python) -> PyResult<Py<PyAny>> {
     let mut last_error: Option<PyErr> = None;
-    for handler in IMAGE_HANDLERS {
+    for handler in ATTRIBUTE_HANDLERS {
         match (handler.to_python)(value, py) {
             Some(value) => match value {
                 Ok(value) => return Ok(value),
@@ -295,7 +295,7 @@ pub fn to_python(key: &str, value: &AttributeValue, py: Python) -> PyResult<Py<P
     }
 
     let mut debug_string = String::new();
-    for handler in IMAGE_HANDLERS {
+    for handler in ATTRIBUTE_HANDLERS {
         debug_string.push_str(handler.name);
         debug_string.push_str(", ");
     }
@@ -316,7 +316,7 @@ pub fn from_python<'py>(
     py: Python<'py>,
 ) -> PyResult<AttributeValue> {
     let mut last_error: Option<PyErr> = None;
-    for handler in IMAGE_HANDLERS {
+    for handler in ATTRIBUTE_HANDLERS {
         match (handler.from_python)(value) {
             Ok(value) => return Ok(value),
             Err(e) => last_error = Some(e),
@@ -324,7 +324,7 @@ pub fn from_python<'py>(
     }
 
     let mut debug_string = String::new();
-    for handler in IMAGE_HANDLERS {
+    for handler in ATTRIBUTE_HANDLERS {
         debug_string.push_str(handler.name);
         debug_string.push_str(", ");
     }

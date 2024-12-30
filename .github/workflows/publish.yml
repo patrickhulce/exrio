@@ -15,7 +15,7 @@ jobs:
           python-version: 3.9
           architecture: arm64
       - uses: dtolnay/rust-toolchain@stable
-      - run: scripts/setversion.sh ${{ github.ref_name }}
+      - run: bash scripts/setversion.sh ${{ github.ref_name }}
       - name: Build wheels - arm64
         uses: PyO3/maturin-action@v1
         with:
@@ -44,7 +44,7 @@ jobs:
           python-version: 3.9
           architecture: ${{ matrix.target }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: scripts/setversion.sh ${{ github.ref_name }}
+      - run: bash scripts/setversion.sh ${{ github.ref_name }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -72,7 +72,7 @@ jobs:
       with:
         python-version: 3.9
         architecture: x64
-    - run: scripts/setversion.sh ${{ github.ref_name }}
+    - run: bash scripts/setversion.sh ${{ github.ref_name }}
     - name: Build wheels
       uses: PyO3/maturin-action@v1
       with:

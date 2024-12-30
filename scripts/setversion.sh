@@ -13,3 +13,9 @@ VERSION_TARGET=${VERSION_TAG#v}
 
 sed -i "s/$VERSION_TO_REPLACE/$VERSION_TARGET/" pyproject.toml
 sed -i "s/$VERSION_TO_REPLACE/$VERSION_TARGET/" rust/Cargo.toml
+
+# Confirm the version has been updated.
+grep "version =" pyproject.toml
+grep "version = \"$VERSION_TARGET\"" pyproject.toml
+grep "version =" rust/Cargo.toml
+grep "version = \"$VERSION_TARGET\"" rust/Cargo.toml

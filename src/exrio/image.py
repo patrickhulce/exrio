@@ -134,6 +134,10 @@ class ExrImage:
     def to_buffer(self) -> bytes:
         return self._to_rust().save_to_buffer()
 
+    def to_path(self, path: Union[str, Path]) -> None:
+        with open(path, "wb") as file:
+            file.write(self.to_buffer())
+
     def to_pixels(self) -> np.ndarray:
         num_layers = len(self.layers)
         assert num_layers == 1, f"ambiguous reference, image has {num_layers} layers"
@@ -202,7 +206,7 @@ class ExrImage:
         return ExrImage(layers=[layer], attributes={"Aces Image Container Flag": 1})
 
     @staticmethod
-    def from_pixels_aces(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACES(pixels: np.ndarray) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACES2065-1 pixels in float16/float32 HWC layout.
 
@@ -215,7 +219,7 @@ class ExrImage:
         return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP0"])
 
     @staticmethod
-    def from_pixels_acescg(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACEScg(pixels: np.ndarray) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACEScg pixels in float16/float32 HWC layout.
 
@@ -228,7 +232,7 @@ class ExrImage:
         return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
 
     @staticmethod
-    def from_pixels_acescct(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACEScct(pixels: np.ndarray) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACEScct pixels in float16/float32 HWC layout.
 
@@ -241,7 +245,7 @@ class ExrImage:
         return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
 
     @staticmethod
-    def from_pixels_srgb(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_sRGB(pixels: np.ndarray) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA sRGB pixels in HWC layout.
 
@@ -259,13 +263,13 @@ class ExrImage:
         pixels: np.ndarray, colorspace: Colorspace = Colorspace.sRGB
     ) -> "ExrImage":
         if colorspace == Colorspace.ACES:
-            return ExrImage.from_pixels_aces(pixels)
+            return ExrImage.from_pixels_ACES(pixels)
         elif colorspace == Colorspace.ACEScg:
-            return ExrImage.from_pixels_acescg(pixels)
+            return ExrImage.from_pixels_ACEScg(pixels)
         elif colorspace == Colorspace.ACEScct:
-            return ExrImage.from_pixels_acescct(pixels)
+            return ExrImage.from_pixels_ACEScct(pixels)
         elif colorspace == Colorspace.sRGB:
-            return ExrImage.from_pixels_srgb(pixels)
+            return ExrImage.from_pixels_sRGB(pixels)
         else:
             raise ValueError(f"Unsupported colorspace: {colorspace}")
 

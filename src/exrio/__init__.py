@@ -1,4 +1,6 @@
 from .image import (
+    Chromaticities,
+    Colorspace,
     ExrChannel,
     ExrImage,
     ExrLayer,
@@ -10,4 +12,6 @@ __all__ = [
     "ExrImage",
     "ExrLayer",
     "ExrChannel",
+    "Chromaticities",
+    "Colorspace",
 ]

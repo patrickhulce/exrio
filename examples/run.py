@@ -1,5 +1,6 @@
 import json
 import re
+import traceback
 import zipfile
 from pathlib import Path
 
@@ -9,10 +10,8 @@ import requests
 
 from exrio import ExrChannel, ExrLayer, load
 
-EXAMPLES_ZIP_URL = "https://github.com/patrickhulce/exrio/releases/download/v0.0.1/examples-f3a092c07d1ce9b76bfe89c91903df91.zip"
-EXAMPLES_DATA_PATH = (
-    Path(__file__).parent.parent / ".data" / "examples-f3a092c07d1ce9b76bfe89c91903df91"
-)
+EXAMPLES_ZIP_URL = "https://github.com/patrickhulce/exrio/releases/download/v0.0.2/examples-v20241230.zip"
+EXAMPLES_DATA_PATH = Path(__file__).parent.parent / ".data" / "examples-v20241230"
 
 
 def download_examples() -> None:
@@ -35,9 +34,15 @@ def download_examples() -> None:
     print("Examples downloaded and extracted.")
 
 
+def linear_to_srgb(pixels: np.ndarray) -> np.ndarray:
+    return np.clip(pixels**2.2, 0, 1)
+
+
 def write_channel(layer: ExrLayer, channel: ExrChannel, exr_path: Path) -> None:
-    clean_layer_name = re.sub(r"[^a-zA-Z0-9]+", "_", layer.name)
-    clean_channel_name = re.sub(r"[^a-zA-Z0-9]+", "_", channel.name)
+    layer_name = layer.name or "unknown_layer"
+    clean_layer_name = re.sub(r"[^a-zA-Z0-9]+", "_", layer_name)
+    channel_name = channel.name or "unknown_channel"
+    clean_channel_name = re.sub(r"[^a-zA-Z0-9]+", "_", channel_name)
     channel_path = exr_path.with_suffix(".png")
     channel_path = channel_path.with_stem(
         f"{channel_path.stem}_{clean_layer_name}_{clean_channel_name}"
@@ -48,16 +53,12 @@ def write_channel(layer: ExrLayer, channel: ExrChannel, exr_path: Path) -> None:
     if min_pixel_value >= -0.1 and max_pixel_value <= 1:
         normalized_pixels = channel_pixels * 255
         normalized_pixels = normalized_pixels.clip(0, 255).astype(np.uint8)
-    elif min_pixel_value >= -1 and max_pixel_value <= 255 and max_pixel_value >= 1:
-        normalized_pixels = channel_pixels.clip(0, 255).astype(np.uint8)
-    elif min_pixel_value >= 0 and max_pixel_value <= 1023 and max_pixel_value >= 256:
-        normalized_pixels = (channel_pixels / 1023 * 255).astype(np.uint8)
     else:
-        raise ValueError(
-            f"Unsupported pixel range: {min_pixel_value}-{max_pixel_value} for channel {channel.name} in {layer.name}"
-        )
+        # It's probably linear, so we need to do a rough gamma correction.
+        normalized_pixels = linear_to_srgb(channel_pixels)
+        normalized_pixels = (normalized_pixels * 255).clip(0, 255).astype(np.uint8)
 
-    print(f"Saving channel {channel.name} in {layer.name} to {channel_path}...")
+    print(f"Saving channel {channel_name} in {layer_name} to {channel_path}...")
     channel_image = PIL.Image.fromarray(normalized_pixels)
     channel_image.save(channel_path)
 
@@ -106,7 +107,9 @@ def run_example(example_exr_path: Path) -> None:
             try:
                 write_channel(layer, channel, example_exr_path)
             except Exception as e:
+                stacktrace = traceback.format_exc()
                 print(f"Error writing channel {channel.name} in {layer.name}: {e}")
+                print(f"Stack trace: {stacktrace}")
 
     print(f"Done with example {example_exr_path}")
 

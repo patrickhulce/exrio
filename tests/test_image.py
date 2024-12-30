@@ -2,7 +2,7 @@ from typing import Optional
 
 import numpy as np
 
-from exrio.image import ExrChannel, ExrImage, ExrLayer, load, load_from_path
+from exrio.image import ExrChannel, ExrImage, ExrLayer, load
 
 
 def _create_image(
@@ -22,7 +22,7 @@ def _create_image(
 
 
 def test_load_from_path():
-    image = load_from_path("tests/fixtures/AllHalfValues.exr")
+    image = load("tests/fixtures/AllHalfValues.exr")
     assert image.layers[0].channels[0].pixels.shape == (256, 256)
     assert image.layers[0].channels[0].pixels.dtype == np.float16
 
@@ -50,3 +50,16 @@ def test_roundtrip_u32():
     rt_image = load(buffer)
     assert rt_image.layers[0].channels[0].pixels.dtype == np.uint32
     assert rt_image.layers[0].channels[0].pixels.shape == (320, 240)
+
+
+def test_roundtrip_pixels():
+    input_pixels = np.random.rand(320, 240, 3).astype(np.float32)
+    image = load(input_pixels)
+    assert image.layers[0].channels[0].pixels.dtype == np.float32
+    assert image.layers[0].channels[0].pixels.shape == (320 * 240,)
+
+    output_pixels = image.to_pixels()
+    assert output_pixels.shape == (320, 240, 3)
+    assert output_pixels.dtype == np.float32
+
+    np.testing.assert_allclose(output_pixels, input_pixels)

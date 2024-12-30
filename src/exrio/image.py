@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Union
 
 import numpy as np
@@ -89,7 +90,7 @@ class ExrImage:
     layers: list[ExrLayer]
     attributes: dict[str, Any]
 
-    def save(self) -> bytes:
+    def to_buffer(self) -> bytes:
         return self._to_rust().save_to_buffer()
 
     def _to_rust(self) -> RustImage:
@@ -107,13 +108,22 @@ class ExrImage:
         )
 
 
-def load(buffer: Union[BytesIO, bytes]) -> ExrImage:
+def load(path_or_buffer: Union[BytesIO, bytes, str, Path]) -> ExrImage:
+    if isinstance(path_or_buffer, str) or isinstance(path_or_buffer, Path):
+        return load_from_path(path_or_buffer)
+    elif isinstance(path_or_buffer, bytes) or isinstance(path_or_buffer, BytesIO):
+        return load_from_buffer(path_or_buffer)
+    else:
+        raise ValueError(f"Unsupported type: {type(path_or_buffer)}")
+
+
+def load_from_buffer(buffer: Union[BytesIO, bytes]) -> ExrImage:
     if isinstance(buffer, bytes):
         buffer = BytesIO(buffer)
     return ExrImage._from_rust(RustImage.load_from_buffer(buffer.getvalue()))
 
 
-def load_from_path(path: str) -> ExrImage:
+def load_from_path(path: Union[str, Path]) -> ExrImage:
     with open(path, "rb") as file:
         buffer = BytesIO(file.read())
         return load(buffer)

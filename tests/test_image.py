@@ -30,7 +30,7 @@ def test_load_from_path():
 def test_roundtrip_f32():
     image = _create_image(np.zeros((256, 256), dtype=np.float32))
 
-    buffer = image.save()
+    buffer = image.to_buffer()
     rt_image = load(buffer)
     assert rt_image.layers[0].channels[0].pixels.dtype == np.float32
     assert rt_image.layers[0].channels[0].pixels.shape == (256, 256)
@@ -38,7 +38,7 @@ def test_roundtrip_f32():
 
 def test_roundtrip_f16():
     image = _create_image(np.zeros((320, 240), dtype=np.float16))
-    buffer = image.save()
+    buffer = image.to_buffer()
     rt_image = load(buffer)
     assert rt_image.layers[0].channels[0].pixels.dtype == np.float16
     assert rt_image.layers[0].channels[0].pixels.shape == (320, 240)
@@ -46,7 +46,7 @@ def test_roundtrip_f16():
 
 def test_roundtrip_u32():
     image = _create_image(np.zeros((320, 240), dtype=np.uint32))
-    buffer = image.save()
+    buffer = image.to_buffer()
     rt_image = load(buffer)
     assert rt_image.layers[0].channels[0].pixels.dtype == np.uint32
     assert rt_image.layers[0].channels[0].pixels.shape == (320, 240)

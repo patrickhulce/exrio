@@ -3,7 +3,7 @@ from typing import Optional
 
 import numpy as np
 
-from exrio.image import ExrChannel, ExrImage, ExrLayer, load
+from exrio.image import Colorspace, ExrChannel, ExrImage, ExrLayer, load
 
 
 def _create_image(
@@ -82,3 +82,20 @@ def test_roundtrip_chromaticities():
         assert image_out.chromaticities is not None
         assert image_out.chromaticities.red == (0.5, 0.5)
         assert image_out.chromaticities.blue == (0.0001, -0.0770)
+
+
+def test_infer_colorspace():
+    image = load("tests/fixtures/ACES-2065-1.exr")
+    assert image.inferred_colorspace == Colorspace.ACES
+
+    image = load("tests/fixtures/ACEScg.exr")
+    assert image.inferred_colorspace == Colorspace.ACEScg
+
+    image = load("tests/fixtures/ACEScct.exr")
+    assert image.inferred_colorspace == Colorspace.ACEScct
+
+    image = load("tests/fixtures/sRGB.exr")
+    assert image.inferred_colorspace == Colorspace.sRGB
+
+    image = load("tests/fixtures/AllHalfValues.exr")
+    assert image.inferred_colorspace is None

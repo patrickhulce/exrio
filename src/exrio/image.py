@@ -10,6 +10,8 @@ import numpy as np
 from exrio._rust import ExrImage as RustImage
 from exrio._rust import ExrLayer as RustLayer
 
+ACES_IMAGE_CONTAINER_FLAG = "acesImageContainerFlag"
+
 
 def _pixels_from_layer(layer: RustLayer) -> list[np.ndarray]:
     pixels = layer.pixels()
@@ -28,10 +30,16 @@ class Colorspace(str, Enum):
 
 @dataclass
 class Chromaticities:
-    red: tuple[float, float]
-    green: tuple[float, float]
-    blue: tuple[float, float]
-    white: tuple[float, float]
+    red: tuple[float, float] = field(default=(0.64, 0.33))
+    green: tuple[float, float] = field(default=(0.3, 0.6))
+    blue: tuple[float, float] = field(default=(0.15, 0.06))
+    white: tuple[float, float] = field(default=(0.3127, 0.329))
+
+    def to_list(self) -> list[float]:
+        return [*self.red, *self.green, *self.blue, *self.white]
+
+    def is_close_to(self, other: "Chromaticities") -> bool:
+        return np.allclose(self.to_list(), other.to_list(), atol=1e-3)
 
     @staticmethod
     def _from_rust(chromaticities: str) -> "Chromaticities":
@@ -49,14 +57,7 @@ class Chromaticities:
         )
 
     def _to_rust(self) -> str:
-        values_dict = {
-            "values_f32": [
-                *self.red,
-                *self.green,
-                *self.blue,
-                *self.white,
-            ]
-        }
+        values_dict = {"values_f32": self.to_list()}
         return f"chroma:{json.dumps(values_dict)}"
 
 
@@ -158,6 +159,34 @@ class ExrImage:
     attributes: dict[str, Any] = field(default_factory=dict)
     chromaticities: Optional[Chromaticities] = None
 
+    @property
+    def inferred_colorspace(self) -> Optional[Colorspace]:
+        if self.chromaticities is None:
+            return None
+
+        if self.chromaticities.is_close_to(PRIMARY_CHROMATICITIES["sRGB"]):
+            return Colorspace.sRGB
+        elif self.chromaticities.is_close_to(PRIMARY_CHROMATICITIES["AP0"]):
+            return Colorspace.ACES
+        elif self.chromaticities.is_close_to(PRIMARY_CHROMATICITIES["AP1"]):
+            if not self.first_layer:
+                return None
+
+            pixel_arrays = [c.pixels for c in self.first_layer.channels]
+            max_pixel = max([np.max(pixels) for pixels in pixel_arrays], default=0.0)
+            if max_pixel > 1.0:
+                return Colorspace.ACEScg
+            else:
+                return Colorspace.ACEScct
+
+        return None
+
+    @property
+    def first_layer(self) -> Optional[ExrLayer]:
+        if len(self.layers) == 0:
+            return None
+        return self.layers[0]
+
     def to_buffer(self) -> bytes:
         return self._to_rust().save_to_buffer()
 
@@ -252,11 +281,7 @@ class ExrImage:
             channels=channels,
         )
 
-        return ExrImage(
-            layers=[layer],
-            attributes={"Aces Image Container Flag": 1},
-            chromaticities=chromaticities,
-        )
+        return ExrImage(layers=[layer], chromaticities=chromaticities)
 
     @staticmethod
     def from_pixels_ACES(pixels: np.ndarray) -> "ExrImage":
@@ -269,7 +294,9 @@ class ExrImage:
         @see https://pub.smpte.org/pub/st2065-1/st2065-1-2021.pdf
         """
         assert pixels.dtype in [np.float16, np.float32]
-        return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP0"])
+        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP0"])
+        image.attributes[ACES_IMAGE_CONTAINER_FLAG] = 1
+        return image
 
     @staticmethod
     def from_pixels_ACEScg(pixels: np.ndarray) -> "ExrImage":

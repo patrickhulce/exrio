@@ -11,8 +11,15 @@ VERSION_TO_REPLACE="0.0.0-dev"
 VERSION_TAG=$1
 VERSION_TARGET=${VERSION_TAG#v}
 
-sed -i "s/$VERSION_TO_REPLACE/$VERSION_TARGET/" pyproject.toml
-sed -i "s/$VERSION_TO_REPLACE/$VERSION_TARGET/" rust/Cargo.toml
+OS=$(uname -s)
+if [[ "$OS" == "Darwin" ]]; then
+    SED_OPTIONS=("-i" "")
+else
+    SED_OPTIONS=("-i")
+fi
+
+sed "${SED_OPTIONS[@]}" "s/$VERSION_TO_REPLACE/$VERSION_TARGET/" pyproject.toml
+sed "${SED_OPTIONS[@]}" "s/$VERSION_TO_REPLACE/$VERSION_TARGET/" rust/Cargo.toml
 
 # Confirm the version has been updated.
 grep "version =" pyproject.toml

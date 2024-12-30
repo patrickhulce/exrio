@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import PyOpenColorIO as OCIO
 
@@ -19,6 +20,20 @@ def apply_transform(processor: OCIO.Processor, pixels: np.ndarray):
         cpu.applyRGBA(pixels)
 
 
+def convert_to_acescg(pixels: np.ndarray, output_path: Path):
+    ocio_config = OCIO.Config().CreateFromBuiltinConfig(ACES_CONFIG)
+    from_transform = "ACES2065-1"
+    to_transform = "ACEScg"
+
+    acesscg_pixels = pixels.copy()
+    processor = ocio_config.getProcessor(from_transform, to_transform)
+    apply_transform(processor, acesscg_pixels)
+
+    acesscg_image = ExrImage.from_pixels_ACEScg(acesscg_pixels)
+    acesscg_image.to_path(output_path)
+    return acesscg_pixels
+
+
 def convert_to_acescct(pixels: np.ndarray, output_path: Path):
     ocio_config = OCIO.Config().CreateFromBuiltinConfig(ACES_CONFIG)
     from_transform = "ACES2065-1"
@@ -30,6 +45,7 @@ def convert_to_acescct(pixels: np.ndarray, output_path: Path):
 
     acesscct_image = ExrImage.from_pixels_ACEScct(acesscct_pixels)
     acesscct_image.to_path(output_path)
+    return acesscct_pixels
 
 
 def convert_to_srgb(pixels: np.ndarray, output_path: Path):
@@ -46,6 +62,45 @@ def convert_to_srgb(pixels: np.ndarray, output_path: Path):
 
     srgb_image = ExrImage.from_pixels(srgb_pixels)
     srgb_image.to_path(output_path)
+    return srgb_pixels
+
+
+def plot_image_and_histogram(images_and_labels: list[tuple[np.ndarray, str]]):
+    """Display multiple images and their histograms stacked vertically.
+
+    Args:
+        images_and_labels: List of (image_array, label) tuples to display
+    """
+    n_images = len(images_and_labels)
+    fig, axes = plt.subplots(n_images, 2, figsize=(15, 5 * n_images))
+
+    for idx, (pixels, label) in enumerate(images_and_labels):
+        ax1, ax2 = axes[idx]
+
+        # Plot the image
+        ax1.imshow(pixels)
+        ax1.set_title(f"{label} - Image")
+        ax1.axis("off")
+
+        # Plot histogram for each channel
+        colors = ["red", "green", "blue"]
+        for i, color in enumerate(colors):
+            ax2.hist(
+                pixels[:, :, i].ravel(),
+                bins=256,
+                range=(-0.1, 1),
+                color=color,
+                alpha=0.5,
+                label=color.upper(),
+            )
+
+        ax2.set_title(f"{label} - Channel Distribution")
+        ax2.set_xlabel("Pixel Value")
+        ax2.set_ylabel("Frequency")
+        ax2.legend()
+
+    plt.tight_layout(h_pad=0.0)
+    plt.show()
 
 
 def main():
@@ -57,8 +112,17 @@ def main():
 
     output_dir.mkdir(parents=True, exist_ok=True)
     image.to_path(output_dir / "out_original.exr")
-    convert_to_acescct(pixels, output_dir / "out_acescct.exr")
-    convert_to_srgb(pixels, output_dir / "out_srgb.exr")
+    acescg_pixels = convert_to_acescg(pixels, output_dir / "out_acescg.exr")
+    acescct_pixels = convert_to_acescct(pixels, output_dir / "out_acescct.exr")
+    srgb_pixels = convert_to_srgb(pixels, output_dir / "out_srgb.exr")
+    plot_image_and_histogram(
+        [
+            (pixels, "ACES2065-1"),
+            (acescg_pixels, "ACEScg"),
+            (acescct_pixels, "ACEScct"),
+            (srgb_pixels, "sRGB"),
+        ]
+    )
 
 
 if __name__ == "__main__":

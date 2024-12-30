@@ -1,4 +1,5 @@
 from .image import (
+    PRIMARY_CHROMATICITIES,
     Chromaticities,
     Colorspace,
     ExrChannel,
@@ -14,4 +15,5 @@ __all__ = [
     "ExrChannel",
     "Chromaticities",
     "Colorspace",
+    "PRIMARY_CHROMATICITIES",
 ]

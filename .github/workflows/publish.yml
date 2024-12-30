@@ -97,6 +97,7 @@ jobs:
       url: https://pypi.org/p/exrio
     permissions:
       id-token: write
+      contents: write
     steps:
       - name: Download All Wheels
         uses: actions/download-artifact@v4
@@ -108,3 +109,15 @@ jobs:
         run: ls -l dist
       - name: publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+      - name: create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            dist/*.whl

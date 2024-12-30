@@ -59,11 +59,6 @@ fn vec_to_numpy_array<'py>(py: Python<'py>, array_data: &PixelData) -> Bound<'py
 }
 
 fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
-    let name = match &layer.name {
-        Some(name) => name,
-        None => return None,
-    };
-
     let width = match &layer.width {
         Some(width) => width,
         None => return None,
@@ -100,7 +95,10 @@ fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
 
     let image_with_channels = Image::from_channels(Vec2(*width, *height), channels_builder);
 
-    let mut attributes = LayerAttributes::named(Text::from(name.as_str()));
+    let mut attributes = match &layer.name {
+        Some(name) => LayerAttributes::named(Text::from(name.as_str())),
+        None => LayerAttributes::default(),
+    };
     let _ = attributes::layer_attributes_from_attributes(&mut attributes, &layer.attributes);
 
     let layer_out = Layer::new(

@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import numpy as np
 
@@ -38,11 +38,12 @@ class ExrChannel:
 
 @dataclass
 class ExrLayer:
-    name: str
     width: int
     height: int
     channels: list[ExrChannel]
-    attributes: dict[str, Any]
+    name: Optional[str] = None
+    attributes: dict[str, Any] = field(default_factory=dict)
+    chromaticities: Optional[Chromaticities] = None
 
     def _to_rust(self) -> RustLayer:
         layer = RustLayer(name=self.name)
@@ -57,8 +58,6 @@ class ExrLayer:
 
     @staticmethod
     def _from_rust(rust_layer: RustLayer) -> "ExrLayer":
-        name = rust_layer.name() or "unknown"
-
         width = rust_layer.width()
         assert width is not None
 
@@ -77,7 +76,7 @@ class ExrLayer:
         ]
 
         return ExrLayer(
-            name=name,
+            name=rust_layer.name(),
             width=width,
             height=height,
             channels=channels,

@@ -1,3 +1,4 @@
+import tempfile
 from typing import Optional
 
 import numpy as np
@@ -63,3 +64,21 @@ def test_roundtrip_pixels():
     assert output_pixels.dtype == np.float32
 
     np.testing.assert_allclose(output_pixels, input_pixels)
+
+
+def test_roundtrip_chromaticities():
+    image = load("tests/fixtures/ACES-2065-1.exr")
+    assert image.chromaticities is not None
+    assert image.chromaticities.red == (0.7347, 0.2653)
+    assert image.chromaticities.green == (0.0000, 1.0000)
+    assert image.chromaticities.blue == (0.0001, -0.0770)
+    assert image.chromaticities.white == (0.32168, 0.33767)
+
+    with tempfile.NamedTemporaryFile(suffix=".exr") as f:
+        image.chromaticities.red = (0.5, 0.5)
+        image.to_path(f.name)
+        image_out = load(f.name)
+
+        assert image_out.chromaticities is not None
+        assert image_out.chromaticities.red == (0.5, 0.5)
+        assert image_out.chromaticities.blue == (0.0001, -0.0770)

@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from io import BytesIO
@@ -31,6 +32,32 @@ class Chromaticities:
     green: tuple[float, float]
     blue: tuple[float, float]
     white: tuple[float, float]
+
+    @staticmethod
+    def _from_rust(chromaticities: str) -> "Chromaticities":
+        assert chromaticities.startswith("chroma:{")
+        parsed = json.loads(chromaticities.removeprefix("chroma:"))
+        assert isinstance(parsed, dict)
+        assert "values_f32" in parsed
+        values = parsed["values_f32"]
+        assert len(values) == 8
+        return Chromaticities(
+            red=(values[0], values[1]),
+            green=(values[2], values[3]),
+            blue=(values[4], values[5]),
+            white=(values[6], values[7]),
+        )
+
+    def _to_rust(self) -> str:
+        values_dict = {
+            "values_f32": [
+                *self.red,
+                *self.green,
+                *self.blue,
+                *self.white,
+            ]
+        }
+        return f"chroma:{json.dumps(values_dict)}"
 
 
 PRIMARY_CHROMATICITIES = {
@@ -85,7 +112,6 @@ class ExrLayer:
     channels: list[ExrChannel]
     name: Optional[str] = None
     attributes: dict[str, Any] = field(default_factory=dict)
-    chromaticities: Optional[Chromaticities] = None
 
     def _to_rust(self) -> RustLayer:
         layer = RustLayer(name=self.name)
@@ -129,7 +155,8 @@ class ExrLayer:
 @dataclass
 class ExrImage:
     layers: list[ExrLayer]
-    attributes: dict[str, Any]
+    attributes: dict[str, Any] = field(default_factory=dict)
+    chromaticities: Optional[Chromaticities] = None
 
     def to_buffer(self) -> bytes:
         return self._to_rust().save_to_buffer()
@@ -142,24 +169,47 @@ class ExrImage:
         num_layers = len(self.layers)
         assert num_layers == 1, f"ambiguous reference, image has {num_layers} layers"
         layer = self.layers[0]
-        channel_pixels = [
-            channel.pixels.reshape(layer.height, layer.width)
+        channel_names = set([c.name for c in layer.channels])
+        channel_pixels = {
+            channel.name: channel.pixels.reshape(layer.height, layer.width)
             for channel in layer.channels
-        ]
-        return np.stack(channel_pixels, axis=-1)
+        }
+
+        rgb_pixels = []
+        for channel in ["R", "G", "B"]:
+            assert (
+                channel in channel_names
+            ), f"missing {channel} channel, {channel_names} available"
+            rgb_pixels.append(channel_pixels[channel])
+
+        if "A" in channel_names:
+            rgb_pixels.append(channel_pixels["A"])
+
+        return np.stack(rgb_pixels, axis=-1)
 
     def _to_rust(self) -> RustImage:
         image = RustImage()
-        image.with_attributes(self.attributes)
+
+        attributes = self.attributes.copy()
+        if self.chromaticities is not None:
+            attributes["chromaticities"] = self.chromaticities._to_rust()
+        image.with_attributes(attributes)
+
         for layer in self.layers:
             image.with_layer(layer._to_rust())
+
         return image
 
     @staticmethod
     def _from_rust(rust_image: RustImage) -> "ExrImage":
+        attributes = rust_image.attributes()
+        chromaticities = attributes.get("chromaticities")
+        if chromaticities is not None:
+            chromaticities = Chromaticities._from_rust(chromaticities)
         return ExrImage(
             layers=[ExrLayer._from_rust(layer) for layer in rust_image.layers()],
-            attributes=rust_image.attributes(),
+            attributes=attributes,
+            chromaticities=chromaticities,
         )
 
     @staticmethod
@@ -200,10 +250,13 @@ class ExrImage:
             width=width,
             height=height,
             channels=channels,
-            chromaticities=chromaticities,
         )
 
-        return ExrImage(layers=[layer], attributes={"Aces Image Container Flag": 1})
+        return ExrImage(
+            layers=[layer],
+            attributes={"Aces Image Container Flag": 1},
+            chromaticities=chromaticities,
+        )
 
     @staticmethod
     def from_pixels_ACES(pixels: np.ndarray) -> "ExrImage":

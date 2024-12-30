@@ -74,7 +74,7 @@ dependencies = [
 
 [[package]]
 name = "exrio"
-version = "0.0.1"
+version = "0.0.0-dev"
 dependencies = [
  "exr",
  "half",

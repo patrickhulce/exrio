@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import Enum
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -15,6 +16,47 @@ def _pixels_from_layer(layer: RustLayer) -> list[np.ndarray]:
     return [
         pixels[i].reshape(layer.height(), layer.width()) for i in range(len(pixels))
     ]
+
+
+class Colorspace(str, Enum):
+    sRGB = "sRGB"
+    ACES = "ACES 2065-1"
+    ACEScg = "ACEScg"
+    ACEScct = "ACEScct"
+
+
+@dataclass
+class Chromaticities:
+    red: tuple[float, float]
+    green: tuple[float, float]
+    blue: tuple[float, float]
+    white: tuple[float, float]
+
+
+PRIMARY_CHROMATICITIES = {
+    # https://pub.smpte.org/pub/st2065-1/st2065-1-2021.pdf
+    "AP0": Chromaticities(
+        red=(0.7347, 0.2653),
+        green=(0.0000, 1.0000),
+        blue=(0.0001, -0.0770),
+        white=(0.32168, 0.33767),
+    ),
+    # https://docs.acescentral.com/specifications/acescg/
+    # https://docs.acescentral.com/specifications/acescct/
+    "AP1": Chromaticities(
+        red=(0.713, 0.293),
+        green=(0.165, 0.830),
+        blue=(0.128, 0.044),
+        white=(0.32168, 0.33767),
+    ),
+    # https://www.color.org/chardata/rgb/srgb.xalter
+    "sRGB": Chromaticities(
+        red=(0.64, 0.33),
+        green=(0.3, 0.6),
+        blue=(0.15, 0.06),
+        white=(0.3127, 0.329),
+    ),
+}
 
 
 @dataclass

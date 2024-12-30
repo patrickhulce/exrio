@@ -104,7 +104,12 @@ fn to_rust_layer(layer: &ExrLayer) -> Option<Layer<AnyChannels<FlatSamples>>> {
     let layer_out = Layer::new(
         Vec2(*width, *height),
         attributes,
-        Encoding::FAST_LOSSLESS,
+        Encoding {
+            // Requirements for ACES-compliance https://openexr.com/en/latest/bin/exr2aces.html
+            compression: Compression::PIZ,
+            blocks: Blocks::ScanLines,
+            line_order: LineOrder::Increasing,
+        },
         image_with_channels.layer_data.channel_data,
     );
 

@@ -139,7 +139,7 @@ pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
                     return Err(PyIOError::new_err("Invalid timecode"));
                 }
 
-                let value = value[8..].to_string();
+                let value = value.replace("timecode:", "");
                 match serde_json::from_str::<SerializableAttrValue>(&value) {
                     Ok(value) => {
                         let values_i32 = value.values_i32.unwrap();
@@ -200,20 +200,29 @@ pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
     AttributeValueHandler {
         name: "chromaticities",
         to_python: |value, py| match value {
-            AttributeValue::Chromaticities(chromaticities) => Some(
-                format!(
-                    "chroma:{:?}-{:?}-{:?}-{:?}-{:?}-{:?}-{:?}-{:?}",
-                    chromaticities.red.0,
-                    chromaticities.red.1,
-                    chromaticities.green.0,
-                    chromaticities.green.1,
-                    chromaticities.blue.0,
-                    chromaticities.blue.1,
-                    chromaticities.white.0,
-                    chromaticities.white.1
-                )
-                .into_py_any(py),
-            ),
+            AttributeValue::Chromaticities(chromaticities) => {
+                let serializable_value = SerializableAttrValue {
+                    values_f32: Some(vec![
+                        chromaticities.red.0,
+                        chromaticities.red.1,
+                        chromaticities.green.0,
+                        chromaticities.green.1,
+                        chromaticities.blue.0,
+                        chromaticities.blue.1,
+                        chromaticities.white.0,
+                        chromaticities.white.1,
+                    ]),
+                    values_i32: None,
+                    values_text: None,
+                    values_u8: None,
+                    values_bool: None,
+                };
+
+                match serde_json::to_string(&serializable_value) {
+                    Ok(value) => Some(format!("chroma:{}", value).into_py_any(py)),
+                    Err(e) => return Some(Err(PyIOError::new_err(format!("{} invalid", e)))),
+                }
+            }
             _ => None,
         },
         from_python: |value| match value.extract::<String>() {
@@ -222,22 +231,20 @@ pub const IMAGE_HANDLERS: &[AttributeValueHandler] = &[
                     return Err(PyIOError::new_err("Invalid chromaticities"));
                 }
 
-                let values = value
-                    .replace("chroma:", "")
-                    .split('-')
-                    .flat_map(|s| s.parse::<f32>())
-                    .collect::<Vec<f32>>();
+                let value = value.replace("chroma:", "");
+                match serde_json::from_str::<SerializableAttrValue>(&value) {
+                    Ok(value) => {
+                        let values = value.values_f32.unwrap();
 
-                if values.len() != 8 {
-                    return Err(PyIOError::new_err("Invalid chromaticities"));
+                        Ok(AttributeValue::Chromaticities(Chromaticities {
+                            red: Vec2(values[0], values[1]),
+                            green: Vec2(values[2], values[3]),
+                            blue: Vec2(values[4], values[5]),
+                            white: Vec2(values[6], values[7]),
+                        }))
+                    }
+                    Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
                 }
-
-                Ok(AttributeValue::Chromaticities(Chromaticities {
-                    red: Vec2(values[0], values[1]),
-                    green: Vec2(values[2], values[3]),
-                    blue: Vec2(values[4], values[5]),
-                    white: Vec2(values[6], values[7]),
-                }))
             }
             Err(e) => Err(PyIOError::new_err(format!("{} invalid", e))),
         },

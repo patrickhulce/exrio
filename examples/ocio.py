@@ -26,14 +26,19 @@ def convert_to_acescg(pixels: np.ndarray, output_path: Path):
     from_transform = "ACES2065-1"
     to_transform = "ACEScg"
 
-    acesscg_pixels = pixels.copy()
+    acescg_pixels = pixels.copy()
     processor = ocio_config.getProcessor(from_transform, to_transform)
-    apply_transform(processor, acesscg_pixels)
+    apply_transform(processor, acescg_pixels)
 
-    acesscg_image = ExrImage.from_pixels_ACEScg(acesscg_pixels)
-    acesscg_image.to_path(output_path)
-    write_thumbnail(acesscg_image, output_path, Colorspace.ACEScg)
-    return acesscg_pixels
+    back_to_aces = acescg_pixels.copy()
+    reverse_processor = ocio_config.getProcessor(to_transform, from_transform)
+    apply_transform(reverse_processor, back_to_aces)
+
+    acescg_image = ExrImage.from_pixels_ACEScg(acescg_pixels)
+    acescg_image.to_path(output_path)
+    write_thumbnail(acescg_image, output_path, Colorspace.ACEScg)
+
+    return acescg_pixels, back_to_aces
 
 
 def convert_to_acescct(pixels: np.ndarray, output_path: Path):
@@ -41,14 +46,19 @@ def convert_to_acescct(pixels: np.ndarray, output_path: Path):
     from_transform = "ACES2065-1"
     to_transform = "ACEScct"
 
-    acesscct_pixels = pixels.copy()
+    acescct_pixels = pixels.copy()
     processor = ocio_config.getProcessor(from_transform, to_transform)
-    apply_transform(processor, acesscct_pixels)
+    apply_transform(processor, acescct_pixels)
 
-    acesscct_image = ExrImage.from_pixels_ACEScct(acesscct_pixels)
-    acesscct_image.to_path(output_path)
-    write_thumbnail(acesscct_image, output_path, Colorspace.ACEScct)
-    return acesscct_pixels
+    back_to_aces = acescct_pixels.copy()
+    reverse_processor = ocio_config.getProcessor(to_transform, from_transform)
+    apply_transform(reverse_processor, back_to_aces)
+
+    acescct_image = ExrImage.from_pixels_ACEScct(acescct_pixels)
+    acescct_image.to_path(output_path)
+    write_thumbnail(acescct_image, output_path, Colorspace.ACEScct)
+
+    return acescct_pixels, back_to_aces
 
 
 def convert_to_srgb(pixels: np.ndarray, output_path: Path):
@@ -60,10 +70,15 @@ def convert_to_srgb(pixels: np.ndarray, output_path: Path):
     processor = ocio_config.getProcessor(from_transform, to_transform)
     apply_transform(processor, srgb_pixels)
 
+    back_to_aces = srgb_pixels.copy()
+    reverse_processor = ocio_config.getProcessor(to_transform, from_transform)
+    apply_transform(reverse_processor, back_to_aces)
+
     srgb_image = ExrImage.from_pixels(srgb_pixels)
     srgb_image.to_path(output_path)
     write_thumbnail(srgb_image, output_path, Colorspace.sRGB)
-    return srgb_pixels
+
+    return srgb_pixels, back_to_aces
 
 
 def convert_to_srgb_rrt(pixels: np.ndarray, output_path: Path):
@@ -78,10 +93,17 @@ def convert_to_srgb_rrt(pixels: np.ndarray, output_path: Path):
     )
     apply_transform(processor, srgb_pixels)
 
+    back_to_aces = srgb_pixels.copy()
+    reverse_processor = ocio_config.getProcessor(
+        from_transform, display, view, OCIO.TRANSFORM_DIR_INVERSE
+    )
+    apply_transform(reverse_processor, back_to_aces)
+
     srgb_image = ExrImage.from_pixels(srgb_pixels)
     srgb_image.to_path(output_path)
     write_thumbnail(srgb_image, output_path, Colorspace.sRGB)
-    return srgb_pixels
+
+    return srgb_pixels, back_to_aces
 
 
 def convert_to_srgb_linear(pixels: np.ndarray, output_path: Path):
@@ -93,47 +115,62 @@ def convert_to_srgb_linear(pixels: np.ndarray, output_path: Path):
     processor = ocio_config.getProcessor(from_transform, to_transform)
     apply_transform(processor, srgb_linear_pixels)
 
+    back_to_aces = srgb_linear_pixels.copy()
+    reverse_processor = ocio_config.getProcessor(to_transform, from_transform)
+    apply_transform(reverse_processor, back_to_aces)
+
     srgb_linear_image = ExrImage.from_pixels(srgb_linear_pixels)
     srgb_linear_image.to_path(output_path)
     write_thumbnail(srgb_linear_image, output_path, Colorspace.LinearRGB)
-    return srgb_linear_pixels
+
+    return srgb_linear_pixels, back_to_aces
 
 
-def plot_image_and_histogram(images_and_labels: list[tuple[np.ndarray, str]]):
-    """Display multiple images and their histograms stacked vertically.
+def plot_image_and_histogram(
+    images_and_labels: list[tuple[np.ndarray, np.ndarray, str]],
+):
+    """Display multiple image pairs and their histograms stacked vertically.
 
     Args:
-        images_and_labels: List of (image_array, label) tuples to display
+        images_and_labels: List of (transformed_image, reverse_transformed_image, label) tuples
     """
     n_images = len(images_and_labels)
-    fig, axes = plt.subplots(n_images, 2, figsize=(15, 5 * n_images))
+    fig, axes = plt.subplots(n_images, 3, figsize=(20, 5 * n_images))
 
-    for idx, (pixels, label) in enumerate(images_and_labels):
-        ax1, ax2 = axes[idx]
+    for idx, (transformed, reverse_transformed, label) in enumerate(images_and_labels):
+        ax1, ax2, ax3 = axes[idx]
 
-        # Plot the image
-        ax1.imshow(pixels)
-        ax1.set_title(f"{label} - Image")
+        # Plot the transformed image
+        ax1.imshow(transformed)
+        ax1.set_title(f"{label}")
         ax1.axis("off")
 
-        # Plot histogram for each channel
+        # Plot the reverse-transformed image
+        ax2.imshow(reverse_transformed)
+        ax2.set_title(f"{label} (Back to ACES)")
+        ax2.axis("off")
+
+        # Plot histograms for just the transformed image
         colors = ["red", "green", "blue"]
         for i, color in enumerate(colors):
-            ax2.hist(
-                pixels[:, :, i].ravel(),
+            # Transformed image histogram (solid lines)
+            ax3.hist(
+                transformed[:, :, i].ravel(),
                 bins=256,
                 range=(-0.1, 1),
                 color=color,
                 alpha=0.5,
-                label=color.upper(),
+                label=f"{color.upper()} transformed",
+                histtype="step",
+                linewidth=2,
             )
 
-        ax2.set_title(f"{label} - Channel Distribution")
-        ax2.set_xlabel("Pixel Value")
-        ax2.set_ylabel("Frequency")
-        ax2.legend()
+        ax3.set_title(f"{label} - Channel Distribution")
+        ax3.set_xlabel("Pixel Value")
+        ax3.set_ylabel("Frequency")
+        ax3.legend()
 
-    plt.tight_layout(h_pad=0.0)
+    plt.tight_layout(h_pad=2.0)
     plt.show()
 
 
@@ -171,19 +208,19 @@ def main():
     image.to_path(output_dir / "out_original.exr")
     write_thumbnail(image, output_dir / "out_original.exr", Colorspace.ACES)
 
-    acescg_pixels = convert_to_acescg(pixels, output_dir / "out_acescg.exr")
-    acescct_pixels = convert_to_acescct(pixels, output_dir / "out_acescct.exr")
-    srgb_pixels = convert_to_srgb(pixels, output_dir / "out_srgb.exr")
-    srgb_rrt_pixels = convert_to_srgb_rrt(pixels, output_dir / "out_srgb_rrt.exr")
-    linear_pixels = convert_to_srgb_linear(pixels, output_dir / "out_srgb_linear.exr")
+    acescg = convert_to_acescg(pixels, output_dir / "out_acescg.exr")
+    acescct = convert_to_acescct(pixels, output_dir / "out_acescct.exr")
+    srgb = convert_to_srgb(pixels, output_dir / "out_srgb.exr")
+    srgb_rrt = convert_to_srgb_rrt(pixels, output_dir / "out_srgb_rrt.exr")
+    linear = convert_to_srgb_linear(pixels, output_dir / "out_srgb_linear.exr")
     plot_image_and_histogram(
         [
-            (pixels, "ACES2065-1"),
-            (acescg_pixels, "ACEScg"),
-            (acescct_pixels, "ACEScct"),
-            (srgb_pixels, "sRGB"),
-            (srgb_rrt_pixels, "sRGB RRT"),
-            (linear_pixels, "sRGB Linear"),
+            (pixels, pixels, "ACES2065-1"),
+            (*acescg, "ACEScg"),
+            (*acescct, "ACEScct"),
+            (*srgb, "sRGB"),
+            (*srgb_rrt, "sRGB RRT"),
+            (*linear, "sRGB Linear"),
         ]
     )
 

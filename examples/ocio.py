@@ -7,7 +7,7 @@ from scipy.ndimage import zoom
 
 from exrio import Colorspace, ExrImage
 
-ACES_CONFIG = "studio-config-v1.0.0_aces-v1.3_ocio-v2.1"
+ACES_CONFIG = "ocio://studio-config-v2.2.0_aces-v1.3_ocio-v2.4"
 
 
 def apply_transform(processor: OCIO.Processor, pixels: np.ndarray):
@@ -22,7 +22,7 @@ def apply_transform(processor: OCIO.Processor, pixels: np.ndarray):
 
 
 def convert_to_acescg(pixels: np.ndarray, output_path: Path):
-    ocio_config = OCIO.Config().CreateFromBuiltinConfig(ACES_CONFIG)
+    ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     to_transform = "ACEScg"
 
@@ -37,7 +37,7 @@ def convert_to_acescg(pixels: np.ndarray, output_path: Path):
 
 
 def convert_to_acescct(pixels: np.ndarray, output_path: Path):
-    ocio_config = OCIO.Config().CreateFromBuiltinConfig(ACES_CONFIG)
+    ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     to_transform = "ACEScct"
 
@@ -52,14 +52,29 @@ def convert_to_acescct(pixels: np.ndarray, output_path: Path):
 
 
 def convert_to_srgb(pixels: np.ndarray, output_path: Path):
-    ocio_config = OCIO.Config().CreateFromBuiltinConfig(ACES_CONFIG)
+    ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
-    to_transform = "sRGB - Display"
+    to_transform = "sRGB Encoded Rec.709 (sRGB)"
+
+    srgb_pixels = pixels.copy()
+    processor = ocio_config.getProcessor(from_transform, to_transform)
+    apply_transform(processor, srgb_pixels)
+
+    srgb_image = ExrImage.from_pixels(srgb_pixels)
+    srgb_image.to_path(output_path)
+    write_thumbnail(srgb_image, output_path, Colorspace.sRGB)
+    return srgb_pixels
+
+
+def convert_to_srgb_rrt(pixels: np.ndarray, output_path: Path):
+    ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
+    from_transform = "ACES2065-1"
+    display = "sRGB - Display"
     view = "ACES 1.0 - SDR Video"
 
     srgb_pixels = pixels.copy()
     processor = ocio_config.getProcessor(
-        from_transform, to_transform, view, OCIO.TRANSFORM_DIR_FORWARD
+        from_transform, display, view, OCIO.TRANSFORM_DIR_FORWARD
     )
     apply_transform(processor, srgb_pixels)
 
@@ -67,6 +82,21 @@ def convert_to_srgb(pixels: np.ndarray, output_path: Path):
     srgb_image.to_path(output_path)
     write_thumbnail(srgb_image, output_path, Colorspace.sRGB)
     return srgb_pixels
+
+
+def convert_to_srgb_linear(pixels: np.ndarray, output_path: Path):
+    ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
+    from_transform = "ACES2065-1"
+    to_transform = "Linear Rec.709 (sRGB)"
+
+    srgb_linear_pixels = pixels.copy()
+    processor = ocio_config.getProcessor(from_transform, to_transform)
+    apply_transform(processor, srgb_linear_pixels)
+
+    srgb_linear_image = ExrImage.from_pixels(srgb_linear_pixels)
+    srgb_linear_image.to_path(output_path)
+    write_thumbnail(srgb_linear_image, output_path, Colorspace.LinearRGB)
+    return srgb_linear_pixels
 
 
 def plot_image_and_histogram(images_and_labels: list[tuple[np.ndarray, str]]):
@@ -144,12 +174,16 @@ def main():
     acescg_pixels = convert_to_acescg(pixels, output_dir / "out_acescg.exr")
     acescct_pixels = convert_to_acescct(pixels, output_dir / "out_acescct.exr")
     srgb_pixels = convert_to_srgb(pixels, output_dir / "out_srgb.exr")
+    srgb_rrt_pixels = convert_to_srgb_rrt(pixels, output_dir / "out_srgb_rrt.exr")
+    linear_pixels = convert_to_srgb_linear(pixels, output_dir / "out_srgb_linear.exr")
     plot_image_and_histogram(
         [
             (pixels, "ACES2065-1"),
             (acescg_pixels, "ACEScg"),
             (acescct_pixels, "ACEScct"),
             (srgb_pixels, "sRGB"),
+            (srgb_rrt_pixels, "sRGB RRT"),
+            (linear_pixels, "sRGB Linear"),
         ]
     )
 

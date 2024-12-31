@@ -11,6 +11,7 @@ from exrio._rust import ExrImage as RustImage
 from exrio._rust import ExrLayer as RustLayer
 
 ACES_IMAGE_CONTAINER_FLAG = "acesImageContainerFlag"
+EXRIO_COLORSPACE_KEY = "py/exrio/Colorspace"
 
 
 def _pixels_from_layer(layer: RustLayer) -> list[np.ndarray]:
@@ -23,9 +24,21 @@ def _pixels_from_layer(layer: RustLayer) -> list[np.ndarray]:
 
 class Colorspace(str, Enum):
     sRGB = "sRGB"
+    LinearRGB = "Linear Rec.709 (sRGB)"
     ACES = "ACES 2065-1"
     ACEScg = "ACEScg"
+    ACEScc = "ACEScc"
     ACEScct = "ACEScct"
+
+    @staticmethod
+    def from_dict(dict: dict[str, Any]) -> Optional["Colorspace"]:
+        if EXRIO_COLORSPACE_KEY not in dict:
+            return None
+        value = dict[EXRIO_COLORSPACE_KEY]
+        if not isinstance(value, str):
+            return None
+
+        return next((color for color in Colorspace if color.value == value), None)
 
 
 @dataclass
@@ -161,12 +174,33 @@ class ExrImage:
 
     @property
     def inferred_colorspace(self) -> Optional[Colorspace]:
+        """
+        Makes a best-effort guess at the colorspace of the image using the exrio-specific
+        colorspace attribute, the chromaticities attribute, and the maximum pixel value.
+
+        This is not fool-proof and should not be a substitute for proper colorspace tagging.
+        But it can be useful for dealing with sources outside of your control.
+        """
+
+        image_colorspace = Colorspace.from_dict(self.attributes)
+        if image_colorspace is not None:
+            return image_colorspace
+
+        layer_colorspaces = [
+            Colorspace.from_dict(layer.attributes) for layer in self.layers
+        ]
+        if any(layer_colorspaces):
+            return next(color for color in layer_colorspaces if color is not None)
+
         if self.chromaticities is None:
             return None
 
         if self.chromaticities.is_close_to(PRIMARY_CHROMATICITIES["sRGB"]):
+            # We can't easily determine if the image is sRGB or LinearRGB,
+            # so we'll default to the more common sRGB.
             return Colorspace.sRGB
         elif self.chromaticities.is_close_to(PRIMARY_CHROMATICITIES["AP0"]):
+            # Thankfully, ACES2065-1 is the only supported colorspace that uses the AP0 primaries.
             return Colorspace.ACES
         elif self.chromaticities.is_close_to(PRIMARY_CHROMATICITIES["AP1"]):
             if not self.first_layer:
@@ -175,8 +209,13 @@ class ExrImage:
             pixel_arrays = [c.pixels for c in self.first_layer.channels]
             max_pixel = max([np.max(pixels) for pixels in pixel_arrays], default=0.0)
             if max_pixel > 1.0:
+                # ACEScc/cct are log-encoded with the vast majority of values being <1.0 (~222 in Linear AP1).
+                # ACEScg is linear-encoded with any highlights easily being >1.0.
+                # If the maximum pixel value is >1.0, we'll assume it's ACEScg.
                 return Colorspace.ACEScg
             else:
+                # It's not really possible to determine if the image is ACEScc or ACEScct,
+                # so we'll just pick the one more common in VFX.
                 return Colorspace.ACEScct
 
         return None
@@ -296,6 +335,7 @@ class ExrImage:
         assert pixels.dtype in [np.float16, np.float32]
         image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP0"])
         image.attributes[ACES_IMAGE_CONTAINER_FLAG] = 1
+        image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACES
         return image
 
     @staticmethod
@@ -304,12 +344,29 @@ class ExrImage:
         Creates an EXR image from a set of RGB/RGBA ACEScg pixels in float16/float32 HWC layout.
 
         The output image will have a single layer with those RGB/RGBA channels,
-        the ACEScg container attribute, and the chromaticity values of the AP1 primaries.
+        and the chromaticity values of the AP1 primaries.
 
         @see https://docs.acescentral.com/specifications/acescg/
         """
         assert pixels.dtype in [np.float16, np.float32]
-        return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACEScg
+        return image
+
+    @staticmethod
+    def from_pixels_ACEScc(pixels: np.ndarray) -> "ExrImage":
+        """
+        Creates an EXR image from a set of RGB/RGBA ACEScc pixels in float16/float32 HWC layout.
+
+        The output image will have a single layer with those RGB/RGBA channels,
+        and the chromaticity values of the AP1 primaries.
+
+        @see https://docs.acescentral.com/specifications/acescc/
+        """
+        assert pixels.dtype in [np.float16, np.float32]
+        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACEScc
+        return image
 
     @staticmethod
     def from_pixels_ACEScct(pixels: np.ndarray) -> "ExrImage":
@@ -317,12 +374,14 @@ class ExrImage:
         Creates an EXR image from a set of RGB/RGBA ACEScct pixels in float16/float32 HWC layout.
 
         The output image will have a single layer with those RGB/RGBA channels,
-        the ACEScct container attribute, and the chromaticity values of the AP1 primaries.
+        and the chromaticity values of the AP1 primaries.
 
         @see https://docs.acescentral.com/specifications/acescct/
         """
         assert pixels.dtype in [np.float16, np.float32]
-        return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACEScct
+        return image
 
     @staticmethod
     def from_pixels_sRGB(pixels: np.ndarray) -> "ExrImage":
@@ -330,13 +389,30 @@ class ExrImage:
         Creates an EXR image from a set of RGB/RGBA sRGB pixels in HWC layout.
 
         The output image will have a single layer with those RGB/RGBA channels,
-        the sRGB container attribute, and the chromaticity values of the sRGB primaries.
+        and the chromaticity values of the sRGB/Rec.709 primaries.
 
         @see https://www.color.org/chardata/rgb/srgb.xalter
         """
         if pixels.dtype == np.uint8:
-            pixels = pixels.astype(np.uint32)
-        return ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["sRGB"])
+            pixels = pixels.astype(np.float16) / 255.0
+        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["sRGB"])
+        image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.sRGB
+        return image
+
+    @staticmethod
+    def from_pixels_LinearRGB(pixels: np.ndarray) -> "ExrImage":
+        """
+        Creates an EXR image from a set of RGB/RGBA Linear RGB pixels in HWC layout.
+
+        The output image will have a single layer with those RGB/RGBA channels,
+        and the chromaticity values of the sRGB/Rec.709 primaries.
+
+        @see https://facelessuser.github.io/coloraide/colors/srgb_linear/
+        """
+        assert pixels.dtype in [np.float16, np.float32]
+        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["sRGB"])
+        image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.LinearRGB
+        return image
 
     @staticmethod
     def from_pixels(
@@ -348,8 +424,12 @@ class ExrImage:
             return ExrImage.from_pixels_ACEScg(pixels)
         elif colorspace == Colorspace.ACEScct:
             return ExrImage.from_pixels_ACEScct(pixels)
+        elif colorspace == Colorspace.ACEScc:
+            return ExrImage.from_pixels_ACEScc(pixels)
         elif colorspace == Colorspace.sRGB:
             return ExrImage.from_pixels_sRGB(pixels)
+        elif colorspace == Colorspace.LinearRGB:
+            return ExrImage.from_pixels_LinearRGB(pixels)
         else:
             raise ValueError(f"Unsupported colorspace: {colorspace}")
 

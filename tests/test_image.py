@@ -99,3 +99,21 @@ def test_infer_colorspace():
 
     image = load("tests/fixtures/AllHalfValues.exr")
     assert image.inferred_colorspace is None
+
+
+def test_infer_ACEScc_from_exrio_attribute():
+    image = ExrImage.from_pixels_ACEScc(np.zeros((256, 256, 3), dtype=np.float32))
+    assert image.inferred_colorspace == Colorspace.ACEScc
+
+    buffer = image.to_buffer()
+    image_out = load(buffer)
+    assert image_out.inferred_colorspace == Colorspace.ACEScc
+
+
+def test_infer_LinearRGB_from_exrio_attribute():
+    image = ExrImage.from_pixels_LinearRGB(np.zeros((256, 256, 3), dtype=np.float32))
+    assert image.inferred_colorspace == Colorspace.LinearRGB
+
+    buffer = image.to_buffer()
+    image_out = load(buffer)
+    assert image_out.inferred_colorspace == Colorspace.LinearRGB

@@ -128,6 +128,16 @@ class ExrLayer:
     name: Optional[str] = None
     attributes: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def is_rgb_like(self) -> bool:
+        channel_names = set([c.name for c in self.channels])
+        return channel_names == {"R", "G", "B"} or channel_names == {"R", "G", "B", "A"}
+
+    @property
+    def is_mask_like(self) -> bool:
+        channel_names = set([c.name for c in self.channels])
+        return channel_names == {"L"} or channel_names == {"A"}
+
     def _to_rust(self) -> RustLayer:
         layer = RustLayer(name=self.name)
         layer.with_width(self.width)
@@ -138,6 +148,30 @@ class ExrLayer:
             pixels = channel.pixels.flatten()
             layer.with_channel(channel=channel.name, pixels=pixels.copy(order="C"))
         return layer
+
+    def to_pixels(self) -> NDArray[Any]:
+        channel_names = set([c.name for c in self.channels])
+        channel_pixels = {
+            channel.name: channel.pixels.reshape(self.height, self.width)
+            for channel in self.channels
+        }
+
+        if self.is_mask_like:
+            empty_pixels = np.zeros((self.height, self.width))
+            pixels = next(iter(channel_pixels.values()), empty_pixels)
+            return pixels.reshape(self.height, self.width, 1)
+
+        rgb_pixels = []
+        for channel in ["R", "G", "B"]:
+            assert (
+                channel in channel_names
+            ), f"missing {channel} channel, {channel_names} available"
+            rgb_pixels.append(channel_pixels[channel])
+
+        if "A" in channel_names:
+            rgb_pixels.append(channel_pixels["A"])
+
+        return np.stack(rgb_pixels, axis=-1)
 
     @staticmethod
     def _from_rust(rust_layer: RustLayer) -> "ExrLayer":
@@ -234,27 +268,35 @@ class ExrImage:
         with open(path, "wb") as file:
             file.write(self.to_buffer())
 
-    def to_pixels(self) -> np.ndarray:
-        num_layers = len(self.layers)
-        assert num_layers == 1, f"ambiguous reference, image has {num_layers} layers"
-        layer = self.layers[0]
-        channel_names = set([c.name for c in layer.channels])
-        channel_pixels = {
-            channel.name: channel.pixels.reshape(layer.height, layer.width)
-            for channel in layer.channels
-        }
+    def to_pixels(self) -> NDArray[Any]:
+        """
+        Returns a NHWC L/RGB/RGBA image for all layers that have the same dimensions
+        as the first L/RGB/RGBA layer.
 
-        rgb_pixels = []
-        for channel in ["R", "G", "B"]:
-            assert (
-                channel in channel_names
-            ), f"missing {channel} channel, {channel_names} available"
-            rgb_pixels.append(channel_pixels[channel])
+        Preference is given to RGB/RGBA layers, then L layers if none are found.
+        If there are no L/RGB/RGBA layers, an error is raised.
+        """
+        layers = [layer for layer in self.layers if layer.is_rgb_like]
+        if len(layers) > 0:
+            channel_count = len(layers[0].channels)
+        else:
+            layers = [layer for layer in self.layers if layer.is_mask_like]
+            if len(layers) == 0:
+                raise ValueError("no L/RGB/RGBA layers found")
+            else:
+                channel_count = len(layers[0].channels)
 
-        if "A" in channel_names:
-            rgb_pixels.append(channel_pixels["A"])
+        width, height = layers[0].width, layers[0].height
+        matching_layers = [
+            layer
+            for layer in layers
+            if layer.width == width
+            and layer.height == height
+            and len(layer.channels) == channel_count
+        ]
 
-        return np.stack(rgb_pixels, axis=-1)
+        pixels = [layer.to_pixels() for layer in matching_layers]
+        return np.stack(pixels, axis=0)
 
     def _to_rust(self) -> RustImage:
         image = RustImage()
@@ -295,36 +337,53 @@ class ExrImage:
 
     @staticmethod
     def _from_pixels(
-        pixels: np.ndarray,
+        pixels: NDArray[Any],
         chromaticities: Chromaticities,
+        layer_names: Optional[list[str]] = None,
     ) -> "ExrImage":
+        if pixels.ndim == 3:
+            pixels = pixels[np.newaxis, ...]
+
+        if layer_names is None:
+            layer_names = [f"layer_{i}" for i in range(pixels.shape[0])]
+        else:
+            assert len(layer_names) == pixels.shape[0]
+
         debug_msg = f"expected float16, float32, or uint32, got {pixels.dtype}"
         assert pixels.dtype in [np.float16, np.float32, np.uint32], debug_msg
 
-        height, width, channel_count = pixels.shape
-        assert channel_count in [3, 4], f"expected 3 or 4 channels, got {channel_count}"
+        frames, height, width, channel_count = pixels.shape
+        debug_msg = f"expected 1, 3, or 4 channels, got {channel_count}"
+        assert channel_count in [1, 3, 4], debug_msg
 
-        channels: list[ExrChannel] = []
-        channel_names = "RGBA"[:channel_count]
-        for idx, channel_name in enumerate(channel_names):
-            channels.append(
-                ExrChannel(
-                    name=channel_name,
+        layers: list[ExrLayer] = []
+        for frame_idx in range(frames):
+            channels: list[ExrChannel] = []
+            channel_names = "L" if channel_count == 1 else "RGBA"[:channel_count]
+            for idx, channel_name in enumerate(channel_names):
+                channels.append(
+                    ExrChannel(
+                        name=channel_name,
+                        width=width,
+                        height=height,
+                        pixels=pixels[frame_idx, ..., idx],
+                    )
+                )
+            layers.append(
+                ExrLayer(
+                    name=layer_names[frame_idx],
                     width=width,
                     height=height,
-                    pixels=pixels[..., idx].flatten(),
+                    channels=channels,
                 )
             )
-        layer = ExrLayer(
-            width=width,
-            height=height,
-            channels=channels,
-        )
 
-        return ExrImage(layers=[layer], chromaticities=chromaticities)
+        return ExrImage(layers=layers, chromaticities=chromaticities)
 
     @staticmethod
-    def from_pixels_ACES(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACES(
+        pixels: NDArray[Any], layer_names: Optional[list[str]] = None
+    ) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACES2065-1 pixels in float16/float32 HWC layout.
 
@@ -334,13 +393,17 @@ class ExrImage:
         @see https://pub.smpte.org/pub/st2065-1/st2065-1-2021.pdf
         """
         assert pixels.dtype in [np.float16, np.float32]
-        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP0"])
+        image = ExrImage._from_pixels(
+            pixels, PRIMARY_CHROMATICITIES["AP0"], layer_names
+        )
         image.attributes[ACES_IMAGE_CONTAINER_FLAG] = 1
         image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACES
         return image
 
     @staticmethod
-    def from_pixels_ACEScg(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACEScg(
+        pixels: NDArray[Any], layer_names: Optional[list[str]] = None
+    ) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACEScg pixels in float16/float32 HWC layout.
 
@@ -350,12 +413,16 @@ class ExrImage:
         @see https://docs.acescentral.com/specifications/acescg/
         """
         assert pixels.dtype in [np.float16, np.float32]
-        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image = ExrImage._from_pixels(
+            pixels, PRIMARY_CHROMATICITIES["AP1"], layer_names
+        )
         image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACEScg
         return image
 
     @staticmethod
-    def from_pixels_ACEScc(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACEScc(
+        pixels: NDArray[Any], layer_names: Optional[list[str]] = None
+    ) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACEScc pixels in float16/float32 HWC layout.
 
@@ -365,12 +432,16 @@ class ExrImage:
         @see https://docs.acescentral.com/specifications/acescc/
         """
         assert pixels.dtype in [np.float16, np.float32]
-        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image = ExrImage._from_pixels(
+            pixels, PRIMARY_CHROMATICITIES["AP1"], layer_names
+        )
         image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACEScc
         return image
 
     @staticmethod
-    def from_pixels_ACEScct(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_ACEScct(
+        pixels: NDArray[Any], layer_names: Optional[list[str]] = None
+    ) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA ACEScct pixels in float16/float32 HWC layout.
 
@@ -380,12 +451,16 @@ class ExrImage:
         @see https://docs.acescentral.com/specifications/acescct/
         """
         assert pixels.dtype in [np.float16, np.float32]
-        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["AP1"])
+        image = ExrImage._from_pixels(
+            pixels, PRIMARY_CHROMATICITIES["AP1"], layer_names
+        )
         image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.ACEScct
         return image
 
     @staticmethod
-    def from_pixels_sRGB(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_sRGB(
+        pixels: NDArray[Any], layer_names: Optional[list[str]] = None
+    ) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA sRGB pixels in HWC layout.
 
@@ -396,12 +471,16 @@ class ExrImage:
         """
         if pixels.dtype == np.uint8:
             pixels = pixels.astype(np.float16) / 255.0
-        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["sRGB"])
+        image = ExrImage._from_pixels(
+            pixels, PRIMARY_CHROMATICITIES["sRGB"], layer_names
+        )
         image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.sRGB
         return image
 
     @staticmethod
-    def from_pixels_LinearRGB(pixels: np.ndarray) -> "ExrImage":
+    def from_pixels_LinearRGB(
+        pixels: NDArray[Any], layer_names: Optional[list[str]] = None
+    ) -> "ExrImage":
         """
         Creates an EXR image from a set of RGB/RGBA Linear RGB pixels in HWC layout.
 
@@ -411,26 +490,30 @@ class ExrImage:
         @see https://facelessuser.github.io/coloraide/colors/srgb_linear/
         """
         assert pixels.dtype in [np.float16, np.float32]
-        image = ExrImage._from_pixels(pixels, PRIMARY_CHROMATICITIES["sRGB"])
+        image = ExrImage._from_pixels(
+            pixels, PRIMARY_CHROMATICITIES["sRGB"], layer_names
+        )
         image.attributes[EXRIO_COLORSPACE_KEY] = Colorspace.LinearRGB
         return image
 
     @staticmethod
     def from_pixels(
-        pixels: np.ndarray, colorspace: Colorspace = Colorspace.sRGB
+        pixels: NDArray[Any],
+        colorspace: Colorspace = Colorspace.sRGB,
+        layer_names: Optional[list[str]] = None,
     ) -> "ExrImage":
         if colorspace == Colorspace.ACES:
-            return ExrImage.from_pixels_ACES(pixels)
+            return ExrImage.from_pixels_ACES(pixels, layer_names)
         elif colorspace == Colorspace.ACEScg:
-            return ExrImage.from_pixels_ACEScg(pixels)
+            return ExrImage.from_pixels_ACEScg(pixels, layer_names)
         elif colorspace == Colorspace.ACEScct:
-            return ExrImage.from_pixels_ACEScct(pixels)
+            return ExrImage.from_pixels_ACEScct(pixels, layer_names)
         elif colorspace == Colorspace.ACEScc:
-            return ExrImage.from_pixels_ACEScc(pixels)
+            return ExrImage.from_pixels_ACEScc(pixels, layer_names)
         elif colorspace == Colorspace.sRGB:
-            return ExrImage.from_pixels_sRGB(pixels)
+            return ExrImage.from_pixels_sRGB(pixels, layer_names)
         elif colorspace == Colorspace.LinearRGB:
-            return ExrImage.from_pixels_LinearRGB(pixels)
+            return ExrImage.from_pixels_LinearRGB(pixels, layer_names)
         else:
             raise ValueError(f"Unsupported colorspace: {colorspace}")
 

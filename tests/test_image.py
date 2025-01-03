@@ -57,13 +57,50 @@ def test_roundtrip_pixels():
     input_pixels = np.random.rand(320, 240, 3).astype(np.float32)
     image = load(input_pixels)
     assert image.layers[0].channels[0].pixels.dtype == np.float32
-    assert image.layers[0].channels[0].pixels.shape == (320 * 240,)
+    assert image.layers[0].channels[0].pixels.shape == (320, 240)
 
     output_pixels = image.to_pixels()
-    assert output_pixels.shape == (320, 240, 3)
+    assert output_pixels.shape == (1, 320, 240, 3)
+    assert output_pixels.dtype == np.float32
+
+    np.testing.assert_allclose(output_pixels[0], input_pixels)
+
+
+def test_roundtrip_pixels_with_layers():
+    input_pixels = np.random.rand(3, 320, 240, 3).astype(np.float32)
+    image = load(input_pixels)
+    assert len(image.layers) == 3
+    for layer in image.layers:
+        assert layer.channels[0].pixels.dtype == np.float32
+        assert layer.channels[0].pixels.shape == (320, 240)
+
+    output_pixels = image.to_pixels()
+    assert output_pixels.shape == (3, 320, 240, 3)
     assert output_pixels.dtype == np.float32
 
     np.testing.assert_allclose(output_pixels, input_pixels)
+
+
+def test_roundtrip_pixels_with_layer_names():
+    input_pixels = np.random.rand(3, 320, 240, 1).astype(np.float32)
+    image = ExrImage.from_pixels(input_pixels, layer_names=["mask", "depth", "color"])
+    assert len(image.layers) == 3
+    for layer in image.layers:
+        assert layer.name in ["mask", "depth", "color"]
+
+    output_pixels = image.to_pixels()
+    assert output_pixels.shape == (3, 320, 240, 1)
+    assert output_pixels.dtype == np.float32
+
+    buffer = image.to_buffer()
+    rt_image = load(buffer)
+    layer_names = [layer.name for layer in rt_image.layers]
+    assert len(rt_image.layers) == 3
+    assert layer_names == ["mask", "depth", "color"]
+    for i, layer in enumerate(rt_image.layers):
+        assert layer.channels[0].pixels.dtype == np.float32
+        assert layer.channels[0].pixels.shape == (320, 240)
+        np.testing.assert_allclose(layer.channels[0].pixels, input_pixels[i, :, :, 0])
 
 
 def test_roundtrip_chromaticities():

@@ -1,0 +1,16 @@
+{
+  "typeCheckingMode": "basic",
+  "include": ["src/exrio"],
+  "exclude": ["**/.venv", "**/dist", "**/build", "**/_pynt"],
+  "useLibraryCodeForTypes": true,
+  "reportMissingParameterType": "error",
+  "reportMissingTypeArgument": "error",
+  "reportMissingTypeStubs": "none",
+  "reportPrivateImportUsage": "none",
+  "reportUnusedCallResult": "none",
+  "reportUnknownMemberType": "none",
+  "reportUnknownParameterType": "none",
+  "reportIncompatibleMethodOverride": "none",
+  "reportUnnecessaryTypeIgnoreComment": "none",
+  "pythonVersion": "3.9"
+}

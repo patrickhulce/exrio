@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 import numpy as np
+from numpy.typing import NDArray
 
 from exrio._rust import ExrImage as RustImage
 from exrio._rust import ExrLayer as RustLayer
@@ -14,7 +15,7 @@ ACES_IMAGE_CONTAINER_FLAG = "acesImageContainerFlag"
 EXRIO_COLORSPACE_KEY = "py/exrio/Colorspace"
 
 
-def _pixels_from_layer(layer: RustLayer) -> list[np.ndarray]:
+def _pixels_from_layer(layer: RustLayer) -> list[NDArray[Any]]:
     pixels = layer.pixels()
     assert pixels is not None
     return [
@@ -105,11 +106,11 @@ class ExrChannel:
     name: str
     width: int
     height: int
-    pixels: np.ndarray
+    pixels: NDArray[Any]
 
     @staticmethod
     def _from_rust(
-        name: str, width: int, height: int, pixels: np.ndarray
+        name: str, width: int, height: int, pixels: NDArray[Any]
     ) -> "ExrChannel":
         return ExrChannel(
             name=name,
@@ -434,7 +435,7 @@ class ExrImage:
             raise ValueError(f"Unsupported colorspace: {colorspace}")
 
 
-def load(path_or_buffer: Union[BytesIO, bytes, str, Path, np.ndarray]) -> ExrImage:
+def load(path_or_buffer: Union[BytesIO, bytes, str, Path, NDArray[Any]]) -> ExrImage:
     if isinstance(path_or_buffer, np.ndarray):
         return ExrImage.from_pixels(path_or_buffer)
     elif isinstance(path_or_buffer, str) or isinstance(path_or_buffer, Path):

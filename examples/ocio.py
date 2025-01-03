@@ -3,6 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import PyOpenColorIO as OCIO
+from numpy.typing import NDArray
 from scipy.ndimage import zoom
 
 from exrio import Colorspace, ExrImage
@@ -10,7 +11,7 @@ from exrio import Colorspace, ExrImage
 ACES_CONFIG = "ocio://studio-config-v2.2.0_aces-v1.3_ocio-v2.4"
 
 
-def apply_transform(processor: OCIO.Processor, pixels: np.ndarray):
+def apply_transform(processor: OCIO.Processor, pixels: NDArray[np.float32]):
     if pixels.dtype.name != "float32":
         raise ValueError("Image must be float32 not " + pixels.dtype.name)
     cpu = processor.getDefaultCPUProcessor()
@@ -21,7 +22,7 @@ def apply_transform(processor: OCIO.Processor, pixels: np.ndarray):
         cpu.applyRGBA(pixels)
 
 
-def convert_to_acescg(pixels: np.ndarray, output_path: Path):
+def convert_to_acescg(pixels: NDArray[np.float32], output_path: Path):
     ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     to_transform = "ACEScg"
@@ -41,7 +42,7 @@ def convert_to_acescg(pixels: np.ndarray, output_path: Path):
     return acescg_pixels, back_to_aces
 
 
-def convert_to_acescct(pixels: np.ndarray, output_path: Path):
+def convert_to_acescct(pixels: NDArray[np.float32], output_path: Path):
     ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     to_transform = "ACEScct"
@@ -61,7 +62,7 @@ def convert_to_acescct(pixels: np.ndarray, output_path: Path):
     return acescct_pixels, back_to_aces
 
 
-def convert_to_srgb(pixels: np.ndarray, output_path: Path):
+def convert_to_srgb(pixels: NDArray[np.float32], output_path: Path):
     ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     to_transform = "sRGB Encoded Rec.709 (sRGB)"
@@ -81,7 +82,7 @@ def convert_to_srgb(pixels: np.ndarray, output_path: Path):
     return srgb_pixels, back_to_aces
 
 
-def convert_to_srgb_rrt(pixels: np.ndarray, output_path: Path):
+def convert_to_srgb_rrt(pixels: NDArray[np.float32], output_path: Path):
     ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     display = "sRGB - Display"
@@ -106,7 +107,7 @@ def convert_to_srgb_rrt(pixels: np.ndarray, output_path: Path):
     return srgb_pixels, back_to_aces
 
 
-def convert_to_srgb_linear(pixels: np.ndarray, output_path: Path):
+def convert_to_srgb_linear(pixels: NDArray[np.float32], output_path: Path):
     ocio_config = OCIO.Config().CreateFromFile(ACES_CONFIG)
     from_transform = "ACES2065-1"
     to_transform = "Linear Rec.709 (sRGB)"
@@ -127,7 +128,7 @@ def convert_to_srgb_linear(pixels: np.ndarray, output_path: Path):
 
 
 def plot_image_and_histogram(
-    images_and_labels: list[tuple[np.ndarray, np.ndarray, str]],
+    images_and_labels: list[tuple[NDArray[np.float32], NDArray[np.float32], str]],
 ):
     """Display multiple image pairs and their histograms stacked vertically.
 
@@ -182,7 +183,7 @@ def write_thumbnail(image: ExrImage, original_path: Path, colorspace: Colorspace
         original_path: Path to the original file, used to generate thumbnail path
         colorspace: The colorspace of the image ('ACEScg', 'ACEScct', or None for default)
     """
-    pixels = image.to_pixels()
+    pixels = image.to_pixels()[0]
     # Ensure pixels are float32 before zooming
     pixels = pixels.astype(np.float32)
 
@@ -202,7 +203,7 @@ def main():
     output_dir = Path(__file__).parent.parent / ".data" / "out"
     image_path = examples_dir / "ACES" / "DigitalLAD.2048x1556.exr"
     image = ExrImage.from_path(image_path)
-    pixels = image.to_pixels().astype(np.float32)
+    pixels = image.to_pixels().astype(np.float32)[0]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     image.to_path(output_dir / "out_original.exr")

@@ -1,5 +1,5 @@
 import tempfile
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -7,7 +7,7 @@ from exrio.image import Colorspace, ExrChannel, ExrImage, ExrLayer, load
 
 
 def _create_image(
-    pixels: np.ndarray, attributes: Optional[dict[str, str]] = None
+    pixels: np.ndarray[Any, Any], attributes: Optional[dict[str, str]] = None
 ) -> ExrImage:
     width = pixels.shape[1]
     height = pixels.shape[0]
